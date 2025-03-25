@@ -59,6 +59,17 @@ This template is designed to be easily extended:
 3. **Add New Components**: Follow the existing component structure in `/components`
 4. **Add New Functionality**: Extend utility functions in `/utils`
 
+## 📚 Tutorials
+
+Check out our step-by-step tutorials to learn how to build different types of applications with this template:
+
+- [**NFT Gallery**](docs/tutorials/01-nft-gallery.md) - Display your NFT collection
+- [**NFT Marketplace**](docs/tutorials/02-nft-marketplace.md) - Buy and sell NFTs
+- [**Raffle dApp**](docs/tutorials/03-raffle-contract.md) - Create raffles with prizes
+- [**NFT Escrow Trading**](docs/tutorials/04-nft-escrow.md) - Trade NFTs securely
+
+These tutorials provide detailed guidance for building real-world Ergo applications. View the [tutorial index](docs/tutorials/README.md) for more information.
+
 ## ✅ Key Components
 
 ### WalletConnector
