@@ -1,18 +1,99 @@
-# ergo-basic-template
-A basic site for connecting with the ergo platform
+# Ergo Basic Template
 
-# thank you @LADOPIXEL 
+A modular React template for building applications on the Ergo blockchain. This template provides a structured foundation with reusable components for wallet connection, token display, and a beautiful dashboard interface.
 
-https://fleet-sdk.github.io/docs/
-https://github.com/fleet-sdk
+![Ergo Basic Template](https://ergoplatform.org/en/wp-content/uploads/2023/08/Banner-ERG-2023-1920x1080px-01-1.png)
 
-Nautilus wallet
-https://chromewebstore.google.com/detail/nautilus-wallet/gjlmehlldlphhljhpnlddaodbjjcchai
+## ✨ Features
 
+- **Modular Component Structure**: Components are organized by function for easy reuse
+- **Nautilus Wallet Integration**: Connect to the Ergo blockchain using Nautilus wallet
+- **Complete Wallet Dashboard**: View your ERG balance and all tokens in a beautiful interface
+- **Reusable Utilities**: Common functions for working with ERG, tokens, and wallet interaction
+- **Responsive UI**: Built with Chakra UI for a beautiful, responsive experience
+- **Type Safety**: Written in TypeScript for improved developer experience
+- **Theme Customization**: Easily configurable theme with Ergo-inspired styling
+- **Animations & Transitions**: Smooth animations for a modern user experience
 
-Ergo Platform
-https://ergoplatform.org/en/
+## 🚀 Getting Started
 
+1. Clone this repository:
+   ```
+   git clone https://github.com/yourusername/ergo-basic-template.git
+   cd ergo-basic-template
+   ```
 
-Chakra-ui Create React App
-https://chakra-ui.com/getting-started/cra-guide
+2. Install dependencies:
+   ```
+   npm install
+   ```
+
+3. Start the development server:
+   ```
+   npm start
+   ```
+
+4. Build for production:
+   ```
+   npm run build
+   ```
+
+## 📂 Project Structure
+
+The project is organized for maximum reusability:
+
+- `src/components/`: Reusable UI components
+  - `layout/`: Layout components like Navbar and PageLayout
+  - `wallet/`: Wallet connection components and dashboard
+  - `tokens/`: Token display components
+- `src/utils/`: Utility functions
+  - `ergo.ts`: Ergo-specific utility functions
+- `src/theme.ts`: Customizable Chakra UI theme
+
+## 🛠️ Extending the Template
+
+This template is designed to be easily extended:
+
+1. **Add New Pages**: Create new page components and add them to your routing
+2. **Customize the Theme**: Modify `src/theme.ts` to change colors and styles
+3. **Add New Components**: Follow the existing component structure in `/components`
+4. **Add New Functionality**: Extend utility functions in `/utils`
+
+## ✅ Key Components
+
+### WalletConnector
+
+A component for connecting to Nautilus wallet with a dropdown menu showing:
+- Connection status
+- ERG balance
+- Preview of tokens with amounts
+
+### WalletDashboard
+
+A dashboard displaying:
+- Wallet status and balance overview
+- Complete list of tokens with details
+- Connect button for non-connected state
+
+### TokensDisplay
+
+A grid display of tokens with:
+- Token name
+- Token ID (shortened)
+- Token amount with proper formatting
+
+## 📚 Resources
+
+- [Fleet SDK Documentation](https://fleet-sdk.github.io/docs/)
+- [Ergo Platform](https://ergoplatform.org/en/)
+- [Nautilus Wallet](https://chromewebstore.google.com/detail/nautilus-wallet/gjlmehlldlphhljhpnlddaodbjjcchai)
+- [Chakra UI Documentation](https://chakra-ui.com/docs/getting-started)
+
+## 🙏 Credits
+
+- Thanks to [@LADOPIXEL](https://github.com/LADOPIXEL) for inspiration
+- Built with [Fleet SDK](https://github.com/fleet-sdk) for Ergo blockchain interaction
+
+## 📄 License
+
+MIT
