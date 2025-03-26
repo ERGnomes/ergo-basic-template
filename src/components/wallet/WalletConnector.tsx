@@ -1,4 +1,4 @@
-import React, { useState, forwardRef, useImperativeHandle } from 'react';
+import React, { forwardRef, useImperativeHandle } from 'react';
 import {
   Button,
   Menu,
@@ -9,27 +9,14 @@ import {
   Flex,
   Text,
   VStack,
+  Image,
+  Tooltip,
 } from "@chakra-ui/react";
 import { FaWallet, FaAngleDown } from 'react-icons/fa';
 import { 
-  connectWallet, 
-  disconnectWallet, 
-  formatErgAmount, 
-  getTokensFromUtxos,
-  formatTokenAmount 
+  formatTokenAmount
 } from '../../utils/ergo';
-
-declare global {
-  interface Window {
-    ergoConnector: any;
-  }
-}
-declare var ergo: any;
-
-interface WalletConnectorProps {
-  onWalletConnect: (data: WalletData) => void;
-  onWalletDisconnect: () => void;
-}
+import { useWallet } from '../../context/WalletContext';
 
 export interface WalletData {
   isConnected: boolean;
@@ -38,69 +25,27 @@ export interface WalletData {
   walletStatus: string;
 }
 
-export const WalletConnector = forwardRef<() => void, WalletConnectorProps>(({ 
-  onWalletConnect, 
-  onWalletDisconnect 
-}, ref) => {
-  const [walletStatus, setWalletStatus] = useState('Not connected');
-  const [ergBalance, setErgBalance] = useState('0');
-  const [tokens, setTokens] = useState<any[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  let connected: any;
+export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
+  const { walletData, connectToWallet, disconnectFromWallet } = useWallet();
+  const { isConnected, ergBalance, tokens, walletStatus } = walletData;
 
-  async function handleConnectWallet(): Promise<void> { 
+  // Function to get placeholder image for tokens without images
+  const getPlaceholderImage = (tokenId: string, name: string) => {
     try {
-      connected = await connectWallet();
-      if (connected) {
-        setWalletStatus('Connected');
-        setIsConnected(true);
-        
-        // Get UTXOs
-        const utxos = await ergo.get_utxos();
-        
-        // Calculate ERG balance
-        const totalErg = utxos.reduce((acc: number, utxo: any) => {
-          return acc + parseInt(utxo.value);
-        }, 0);
-        
-        const formattedErgBalance = formatErgAmount(totalErg);
-        setErgBalance(formattedErgBalance);
-
-        // Get all tokens
-        const tokenArray = await getTokensFromUtxos(utxos);
-        setTokens(tokenArray);
-        
-        // Notify parent component
-        onWalletConnect({
-          isConnected: true,
-          ergBalance: formattedErgBalance,
-          tokens: tokenArray,
-          walletStatus: 'Connected'
-        });
-      }
-    } catch (error: any) {
-      console.error('Error connecting to wallet:', error);
-      setWalletStatus('Error: ' + error.message);
-      setIsConnected(false);
+      const hash = tokenId.substring(0, 6);
+      const safeText = name && name.length > 0 
+        ? name.charAt(0).replace(/[^\w\s]/gi, '') // Remove special characters
+        : 'T'; // Default to 'T' for Token if name is empty or only has special chars
+      
+      return `https://via.placeholder.com/40/${hash}?text=${encodeURIComponent(safeText || 'T')}`;
+    } catch (e) {
+      // Fallback to a safe placeholder with no text if encoding fails
+      return `https://via.placeholder.com/40/${tokenId.substring(0, 6)}`;
     }
-  }
-
-  async function handleDisconnectWallet(): Promise<void> {
-    try {
-      await disconnectWallet();
-      setWalletStatus('Disconnected');
-      setIsConnected(false);
-      setErgBalance('0');
-      setTokens([]);
-      onWalletDisconnect();
-    } catch (error: any) {
-      console.error('Error disconnecting wallet:', error);
-      setWalletStatus('Error disconnecting: ' + error.message);
-    }
-  }
+  };
 
   // Expose connect method via ref
-  useImperativeHandle(ref, () => handleConnectWallet);
+  useImperativeHandle(ref, () => connectToWallet);
 
   return (
     <Menu closeOnSelect={false}>
@@ -115,7 +60,7 @@ export const WalletConnector = forwardRef<() => void, WalletConnectorProps>(({
       </MenuButton>
       <MenuList borderWidth="1px" borderColor="ergnome.blue" boxShadow="lg">
         {!isConnected ? (
-          <MenuItem onClick={handleConnectWallet} icon={<Icon as={FaWallet} color="ergnome.blue" />}>
+          <MenuItem onClick={connectToWallet} icon={<Icon as={FaWallet} color="ergnome.blue" />}>
             Connect Nautilus Wallet
           </MenuItem>
         ) : (
@@ -134,12 +79,25 @@ export const WalletConnector = forwardRef<() => void, WalletConnectorProps>(({
             </MenuItem>
             {tokens.length > 0 && (
               <MenuItem closeOnSelect={false}>
-                <VStack align="flex-start" spacing={2} w="100%">
+                <VStack align="flex-start" spacing={3} w="100%">
                   <Text fontWeight="bold" color="ergnome.purple">Your NFTs & Tokens:</Text>
                   {tokens.slice(0, 5).map((token) => (
-                    <Flex key={token.tokenId} justify="space-between" w="100%">
-                      <Text fontSize="sm" isTruncated maxW="150px">{token.name}:</Text>
-                      <Text fontSize="sm" color="ergnome.orange">
+                    <Flex key={token.tokenId} justify="space-between" w="100%" align="center">
+                      <Flex align="center">
+                        <Image 
+                          src={token.imageUrl || getPlaceholderImage(token.tokenId, token.name)}
+                          alt={token.name}
+                          boxSize="24px"
+                          borderRadius="sm"
+                          mr={2}
+                          objectFit="cover"
+                          fallbackSrc={getPlaceholderImage(token.tokenId, token.name)}
+                        />
+                        <Tooltip label={token.name} placement="top" hasArrow>
+                          <Text fontSize="sm" isTruncated maxW="120px">{token.name}</Text>
+                        </Tooltip>
+                      </Flex>
+                      <Text fontSize="sm" color="ergnome.orange" fontWeight="bold">
                         {formatTokenAmount(token.amount, token.decimals)}
                       </Text>
                     </Flex>
@@ -152,7 +110,7 @@ export const WalletConnector = forwardRef<() => void, WalletConnectorProps>(({
                 </VStack>
               </MenuItem>
             )}
-            <MenuItem onClick={handleDisconnectWallet} closeOnSelect={true}>
+            <MenuItem onClick={disconnectFromWallet} closeOnSelect={true}>
               Disconnect Wallet
             </MenuItem>
           </>

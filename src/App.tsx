@@ -1,58 +1,36 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef } from 'react';
 import { ChakraProvider } from "@chakra-ui/react";
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import theme from './theme';
 import { PageLayout } from './components/layout/PageLayout';
-import { WalletConnector, WalletData } from './components/wallet/WalletConnector';
+import { WalletConnector } from './components/wallet/WalletConnector';
 import { WalletDashboard } from './components/wallet/WalletDashboard';
+import NFTGalleryPage from './pages/NFTGalleryPage';
+import { WalletProvider } from './context/WalletContext';
 
 export const App = () => {
-  const [walletData, setWalletData] = useState<WalletData>({
-    isConnected: false,
-    ergBalance: '0',
-    tokens: [],
-    walletStatus: 'Not connected'
-  });
-  
-  // Ref to trigger wallet connect from the dashboard button
+  // Ref to trigger wallet connect from components that need it
   const connectWalletRef = useRef<() => void>(() => {});
-
-  const handleWalletConnect = (data: WalletData) => {
-    setWalletData(data);
-  };
-
-  const handleWalletDisconnect = () => {
-    setWalletData({
-      isConnected: false,
-      ergBalance: '0',
-      tokens: [],
-      walletStatus: 'Disconnected'
-    });
-  };
-
-  const handleConnectRequest = () => {
-    // Call the connect method via ref
-    if (connectWalletRef.current) {
-      connectWalletRef.current();
-    }
-  };
 
   return (
     <ChakraProvider theme={theme}>
-      <PageLayout 
-        title="Ergo Wallet Explorer"
-        navbarRightComponent={
-          <WalletConnector 
-            onWalletConnect={handleWalletConnect} 
-            onWalletDisconnect={handleWalletDisconnect}
-            ref={connectWalletRef}
-          />
-        }
-      >
-        <WalletDashboard 
-          walletData={walletData}
-          onConnectWallet={handleConnectRequest}
-        />
-      </PageLayout>
+      <WalletProvider>
+        <Router>
+          <PageLayout 
+            title="Ergo Wallet Explorer"
+            navbarRightComponent={<WalletConnector ref={connectWalletRef} />}
+            navLinks={[
+              { label: 'Dashboard', to: '/' },
+              { label: 'NFT Gallery', to: '/nft-gallery' }
+            ]}
+          >
+            <Routes>
+              <Route path="/" element={<WalletDashboard />} />
+              <Route path="/nft-gallery" element={<NFTGalleryPage />} />
+            </Routes>
+          </PageLayout>
+        </Router>
+      </WalletProvider>
     </ChakraProvider>
   );
 };

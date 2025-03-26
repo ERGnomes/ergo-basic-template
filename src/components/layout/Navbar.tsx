@@ -3,15 +3,24 @@ import {
   Flex,
   Heading,
   Box,
+  HStack,
+  Button,
 } from "@chakra-ui/react";
+import { Link } from 'react-router-dom';
 import { ColorModeSwitcher } from "../../ColorModeSwitcher";
+
+interface NavLink {
+  label: string;
+  to: string;
+}
 
 interface NavbarProps {
   title: string;
   rightComponent?: ReactNode;
+  navLinks?: NavLink[];
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ title, rightComponent }) => {
+export const Navbar: React.FC<NavbarProps> = ({ title, rightComponent, navLinks = [] }) => {
   return (
     <Flex 
       as="nav" 
@@ -30,6 +39,24 @@ export const Navbar: React.FC<NavbarProps> = ({ title, rightComponent }) => {
           {title}
         </Heading>
       </Flex>
+
+      {/* Navigation Links */}
+      {navLinks.length > 0 && (
+        <HStack spacing={4} display={{ base: 'none', md: 'flex' }}>
+          {navLinks.map((link) => (
+            <Button
+              key={link.to}
+              as={Link}
+              to={link.to}
+              variant="ghost"
+              colorScheme="orange"
+              _hover={{ bg: 'ergnome.hover' }}
+            >
+              {link.label}
+            </Button>
+          ))}
+        </HStack>
+      )}
 
       {/* Right component slot */}
       <Flex align="center">

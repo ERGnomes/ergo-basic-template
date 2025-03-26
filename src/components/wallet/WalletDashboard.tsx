@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Flex,
@@ -8,21 +8,57 @@ import {
   Grid,
   Button,
   Icon,
+  useDisclosure
 } from "@chakra-ui/react";
 import { FaWallet } from 'react-icons/fa';
-import { WalletData } from './WalletConnector';
-import { formatTokenAmount, shortenTokenId } from '../../utils/ergo';
+import { useWallet } from '../../context/WalletContext';
+import { TokenCard, TokenData } from '../common/TokenCard';
+import { TokenModal } from '../common/TokenModal';
+import { is721Metadata } from '../../utils/ergo';
+import { parse721Metadata } from '../../utils/metadata';
+import { MetadataRenderer } from '../common/MetadataRenderer';
 
-interface WalletDashboardProps {
-  walletData: WalletData;
-  onConnectWallet: () => void;
-}
-
-export const WalletDashboard: React.FC<WalletDashboardProps> = ({ 
-  walletData, 
-  onConnectWallet 
-}) => {
+export const WalletDashboard: React.FC = () => {
+  const { walletData, connectToWallet } = useWallet();
   const { isConnected, ergBalance, tokens, walletStatus } = walletData;
+  const [selectedToken, setSelectedToken] = useState<TokenData | null>(null);
+  const { isOpen, onOpen, onClose } = useDisclosure();
+
+  // Function to check if a string is a URL
+  const isUrl = (text: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return urlRegex.test(text);
+  };
+
+  // Function to render description with clickable links or 721 metadata
+  const renderDescription = (description: string, isModal: boolean = false) => {
+    if (!description) return null;
+    
+    // Check if description is 721 metadata
+    if (is721Metadata(description)) {
+      const metadata = parse721Metadata(description);
+      if (metadata) {
+        return <MetadataRenderer metadata={metadata} isModal={isModal} />;
+      }
+    }
+    
+    // Check if description is a URL
+    if (isUrl(description)) {
+      return (
+        <a href={description} target="_blank" rel="noopener noreferrer">
+          {isModal ? description : `${description.substring(0, 30)}...`}
+        </a>
+      );
+    }
+    
+    return <Text fontSize={isModal ? "md" : "sm"} noOfLines={isModal ? undefined : 2}>{description}</Text>;
+  };
+
+  // Handle selecting a token for modal view
+  const handleSelectToken = (token: TokenData) => {
+    setSelectedToken(token);
+    onOpen();
+  };
 
   if (!isConnected) {
     return (
@@ -41,7 +77,7 @@ export const WalletDashboard: React.FC<WalletDashboardProps> = ({
         <Button 
           size="lg" 
           leftIcon={<Icon as={FaWallet} />}
-          onClick={onConnectWallet}
+          onClick={connectToWallet}
           bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
           color="white"
           _hover={{
@@ -58,92 +94,82 @@ export const WalletDashboard: React.FC<WalletDashboardProps> = ({
   }
 
   return (
-    <VStack spacing={8} w="100%" maxW="1200px" mx="auto" p={5}>
-      <Heading 
-        as="h2" 
-        size="2xl" 
-        bgGradient="linear(to-r, ergnome.blue, ergnome.purple)" 
-        bgClip="text"
-        mb={6}
-      >
-        Your Wallet Dashboard
-      </Heading>
-      
-      <Box 
-        p={6} 
-        borderRadius="lg" 
-        bg="ergnome.bg" 
-        borderWidth="2px" 
-        borderColor="ergnome.blue"
-        w="100%"
-        boxShadow="0 4px 20px rgba(65, 157, 217, 0.2)"
-      >
-        <VStack spacing={4} align="flex-start">
-          <Heading size="lg" color="ergnome.blue">Wallet Overview</Heading>
-          <Flex justify="space-between" w="100%">
-            <Text fontSize="lg">Status:</Text>
-            <Text fontSize="lg" color="ergnome.green" fontWeight="bold">{walletStatus}</Text>
-          </Flex>
-          <Flex justify="space-between" w="100%">
-            <Text fontSize="lg">ERG Balance:</Text>
-            <Text fontSize="lg" color="ergnome.yellow" fontWeight="bold">{ergBalance} ERG</Text>
-          </Flex>
-          <Flex justify="space-between" w="100%">
-            <Text fontSize="lg">Tokens:</Text>
-            <Text fontSize="lg" color="ergnome.purple" fontWeight="bold">{tokens.length}</Text>
-          </Flex>
-        </VStack>
-      </Box>
-
-      {tokens.length > 0 && (
+    <>
+      <VStack spacing={8} w="100%" maxW="1200px" mx="auto" p={5}>
+        <Heading 
+          as="h2" 
+          size="2xl" 
+          bgGradient="linear(to-r, ergnome.blue, ergnome.purple)" 
+          bgClip="text"
+          mb={6}
+        >
+          Your Wallet Dashboard
+        </Heading>
+        
         <Box 
           p={6} 
           borderRadius="lg" 
           bg="ergnome.bg" 
           borderWidth="2px" 
-          borderColor="ergnome.purple"
+          borderColor="ergnome.blue"
           w="100%"
-          boxShadow="0 4px 20px rgba(98, 71, 170, 0.2)"
+          boxShadow="0 4px 20px rgba(65, 157, 217, 0.2)"
         >
           <VStack spacing={4} align="flex-start">
-            <Heading size="lg" color="ergnome.purple">Your Tokens & NFTs</Heading>
-            <Grid 
-              templateColumns="repeat(auto-fill, minmax(250px, 1fr))" 
-              gap={4} 
-              w="100%"
-            >
-              {tokens.map((token) => (
-                <Box 
-                  key={token.tokenId} 
-                  p={4} 
-                  borderRadius="md" 
-                  bg="#1f2937" 
-                  borderWidth="1px"
-                  borderColor="ergnome.blue"
-                  transition="all 0.3s"
-                  _hover={{ 
-                    boxShadow: "md", 
-                    borderColor: "ergnome.green",
-                    transform: "translateY(-2px)"
-                  }}
-                >
-                  <VStack align="flex-start" spacing={1}>
-                    <Text fontWeight="bold" color="ergnome.blue" isTruncated maxW="230px">
-                      {token.name || 'Unknown Token'}
-                    </Text>
-                    <Text fontSize="sm" color="gray.400" isTruncated maxW="230px">
-                      {shortenTokenId(token.tokenId)}
-                    </Text>
-                    <Text color="ergnome.orange" fontWeight="bold">
-                      {formatTokenAmount(token.amount, token.decimals)}
-                    </Text>
-                  </VStack>
-                </Box>
-              ))}
-            </Grid>
+            <Heading size="lg" color="ergnome.blue">Wallet Overview</Heading>
+            <Flex justify="space-between" w="100%">
+              <Text fontSize="lg">Status:</Text>
+              <Text fontSize="lg" color="ergnome.green" fontWeight="bold">{walletStatus}</Text>
+            </Flex>
+            <Flex justify="space-between" w="100%">
+              <Text fontSize="lg">ERG Balance:</Text>
+              <Text fontSize="lg" color="ergnome.yellow" fontWeight="bold">{ergBalance} ERG</Text>
+            </Flex>
+            <Flex justify="space-between" w="100%">
+              <Text fontSize="lg">Tokens:</Text>
+              <Text fontSize="lg" color="ergnome.purple" fontWeight="bold">{tokens.length}</Text>
+            </Flex>
           </VStack>
         </Box>
-      )}
-    </VStack>
+
+        {tokens.length > 0 && (
+          <Box 
+            p={6} 
+            borderRadius="lg" 
+            bg="ergnome.bg" 
+            borderWidth="2px" 
+            borderColor="ergnome.purple"
+            w="100%"
+            boxShadow="0 4px 20px rgba(98, 71, 170, 0.2)"
+          >
+            <VStack spacing={4} align="flex-start">
+              <Heading size="lg" color="ergnome.purple">Your Tokens & NFTs</Heading>
+              <Grid 
+                templateColumns="repeat(auto-fill, minmax(250px, 1fr))" 
+                gap={4} 
+                w="100%"
+              >
+                {tokens.map((token) => (
+                  <TokenCard
+                    key={token.tokenId}
+                    token={token}
+                    onSelect={() => handleSelectToken(token)}
+                    renderDescription={renderDescription}
+                  />
+                ))}
+              </Grid>
+            </VStack>
+          </Box>
+        )}
+      </VStack>
+      
+      {/* Token Detail Modal */}
+      <TokenModal
+        token={selectedToken}
+        isOpen={isOpen}
+        onClose={onClose}
+        renderDescription={renderDescription}
+      />
+    </>
   );
 }; 
