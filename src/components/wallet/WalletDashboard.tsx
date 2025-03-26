@@ -8,7 +8,8 @@ import {
   Grid,
   Button,
   Icon,
-  useDisclosure
+  useDisclosure,
+  useColorMode
 } from "@chakra-ui/react";
 import { FaWallet } from 'react-icons/fa';
 import { useWallet } from '../../context/WalletContext';
@@ -21,6 +22,7 @@ import { MetadataRenderer } from '../common/MetadataRenderer';
 export const WalletDashboard: React.FC = () => {
   const { walletData, connectToWallet } = useWallet();
   const { isConnected, ergBalance, tokens, walletStatus } = walletData;
+  const { colorMode } = useColorMode();
   const [selectedToken, setSelectedToken] = useState<TokenData | null>(null);
   const { isOpen, onOpen, onClose } = useDisclosure();
 
@@ -71,7 +73,7 @@ export const WalletDashboard: React.FC = () => {
         >
           Ergo Wallet Explorer
         </Heading>
-        <Text fontSize="xl" color="ergnome.text" textAlign="center" maxW="600px">
+        <Text fontSize="xl" color={colorMode === 'light' ? 'ergnome.text.light' : 'ergnome.text.dark'} textAlign="center" maxW="600px">
           Connect your Nautilus wallet to see your ERG balance and NFTs!
         </Text>
         <Button 
@@ -109,7 +111,7 @@ export const WalletDashboard: React.FC = () => {
         <Box 
           p={6} 
           borderRadius="lg" 
-          bg="ergnome.bg" 
+          bg={colorMode === 'light' ? 'ergnome.cardBg.light' : 'ergnome.cardBg.dark'}
           borderWidth="2px" 
           borderColor="ergnome.blue"
           w="100%"

@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { Box, Container } from "@chakra-ui/react";
+import { Box, Container, useColorMode } from "@chakra-ui/react";
 import { Navbar } from './Navbar';
 
 interface NavLink {
@@ -20,8 +20,10 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
   navLinks,
   children
 }) => {
+  const { colorMode } = useColorMode();
+  
   return (
-    <Box minH="100vh" bg="ergnome.bg">
+    <Box minH="100vh" bg={colorMode === 'light' ? 'ergnome.bg.light' : 'ergnome.bg.dark'}>
       <Navbar 
         title={title} 
         rightComponent={navbarRightComponent} 
