@@ -2,13 +2,31 @@
 
 A modular React template for building applications on the Ergo blockchain. This template provides a structured foundation with reusable components for wallet connection, token display, and a beautiful dashboard interface.
 
-![Ergo Basic Template](https://ergoplatform.org/en/wp-content/uploads/2023/08/Banner-ERG-2023-1920x1080px-01-1.png)
+## 📱 Application Preview
+
+### Landing Page
+![Landing Page](public/Screenshot%201.png)
+*Clean landing page with wallet connection prompt*
+
+### Wallet Dashboard
+![Wallet Dashboard](public/Screenshot%202.png)
+*Dashboard showing wallet overview and NFT collection*
+
+### NFT Gallery
+![NFT Gallery](public/Screenshot%203.png)
+*Dedicated NFT gallery with detailed token information*
+
+### NFT Details
+![NFT Details](public/Screenshot%204.png)
+*Modal view showing detailed NFT traits and metadata*
 
 ## ✨ Features
 
 - **Modular Component Structure**: Components are organized by function for easy reuse
 - **Nautilus Wallet Integration**: Connect to the Ergo blockchain using Nautilus wallet
 - **Complete Wallet Dashboard**: View your ERG balance and all tokens in a beautiful interface
+- **NFT Gallery**: Dedicated page for viewing and managing your NFT collection
+- **Metadata Display**: Beautiful rendering of NFT traits and metadata
 - **Reusable Utilities**: Common functions for working with ERG, tokens, and wallet interaction
 - **Responsive UI**: Built with Chakra UI for a beautiful, responsive experience
 - **Type Safety**: Written in TypeScript for improved developer experience
