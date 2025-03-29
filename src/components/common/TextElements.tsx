@@ -8,37 +8,55 @@ import {
   BadgeProps,
   HeadingProps,
   useColorModeValue,
-  AspectRatio,
-  Icon,
-  Flex
+  Flex,
+  Tooltip,
+  Center
 } from '@chakra-ui/react';
-import { FaExpand } from 'react-icons/fa';
 import { 
   shortenAddress, 
   dynamicFontSize, 
-  formatTitle, 
-  formatPlaceholderText,
-  getTokenColor
+  formatTitle
 } from '../../utils/textFormat';
+import { shortenTokenId } from '../../utils/ergo';
 
 // Address or Token ID display
 interface AddressTextProps extends TextProps {
   address: string;
   startChars?: number;
   endChars?: number;
+  isTokenId?: boolean;
+  showTooltip?: boolean;
 }
 
 export const AddressText: React.FC<AddressTextProps> = ({ 
   address, 
   startChars = 6, 
   endChars = 6,
+  isTokenId = false,
+  showTooltip = true,
   ...props 
 }) => {
-  return (
+  // Use more characters for token IDs by default
+  const start = isTokenId ? 10 : startChars;
+  const end = isTokenId ? 10 : endChars;
+  
+  // Choose the appropriate shortening function
+  const shortened = isTokenId 
+    ? shortenTokenId(address, start, end)
+    : shortenAddress(address, start, end);
+  
+  const content = (
     <Text fontFamily="mono" fontSize="xs" color="gray.500" {...props}>
-      {shortenAddress(address, startChars, endChars)}
+      {shortened}
     </Text>
   );
+  
+  // Wrap in tooltip if needed
+  return showTooltip ? (
+    <Tooltip label={address} placement="top" hasArrow>
+      {content}
+    </Tooltip>
+  ) : content;
 };
 
 // Dynamic Title
@@ -79,54 +97,58 @@ interface PlaceholderImageProps {
   showExpandIcon?: boolean;
 }
 
-export const PlaceholderImage: React.FC<PlaceholderImageProps> = ({ 
-  name, 
-  tokenId,
-  height = "180px",
-  width = "100%",
-  showExpandIcon = true
-}) => {
-  const placeholderBg = useColorModeValue('gray.100', 'gray.700');
-  const displayText = formatPlaceholderText(name);
-  const textColor = getTokenColor(tokenId);
-  const fontSize = dynamicFontSize(name);
+export const PlaceholderImage: React.FC<PlaceholderImageProps> = ({ name, tokenId, height }) => {
+  const textColor = useColorModeValue('white', 'white');
+  
+  // Process name for display as initials
+  let displayName = name || '';
+  let initials = displayName.substring(0, 3).toUpperCase();
+  
+  // Special handling for rosen bridge HOSKY token
+  if (displayName.toLowerCase().includes('rosen') && 
+      displayName.toLowerCase().includes('bridge') &&
+      displayName.toLowerCase().includes('hosky')) {
+    initials = 'HSK';
+  }
+  
+  // Generate a deterministic color from the token ID
+  const tokenColor = tokenId ? 
+    `#${tokenId.substring(0, 6)}` : 
+    '#6247aa'; // Fallback color
   
   return (
-    <AspectRatio ratio={1} height={height} width={width}>
-      <Box
-        bg={placeholderBg}
-        borderRadius="md"
-        display="flex"
-        alignItems="center"
-        justifyContent="center"
-        border="1px solid"
-        borderColor="gray.300"
-        position="relative"
-        overflow="hidden"
+    <Center
+      height={height}
+      width="100%"
+      bg={tokenColor}
+      borderRadius="md"
+      color={textColor}
+      fontSize={height ? "calc(min(5vw, 3rem))" : "2xl"}
+      fontWeight="bold"
+      letterSpacing="wide"
+      position="relative"
+      overflow="hidden"
+    >
+      {/* Colored background with token initials */}
+      <Text 
+        fontSize={height ? "calc(min(5vw, 3rem))" : "2xl"}
+        fontWeight="bold"
+        textShadow="0px 2px 10px rgba(0, 0, 0, 0.3)"
       >
-        <Text 
-          fontSize={fontSize}
-          fontWeight="bold" 
-          color={textColor}
-          textAlign="center"
-          noOfLines={1}
-          px={2}
-        >
-          {displayText}
-        </Text>
-        {showExpandIcon && (
-          <Text
-            position="absolute"
-            bottom="5px"
-            right="5px"
-            fontSize="xs"
-            color="gray.500"
-          >
-            <Icon as={FaExpand} />
-          </Text>
-        )}
-      </Box>
-    </AspectRatio>
+        {initials}
+      </Text>
+      
+      {/* Small token ID display at bottom */}
+      <Text 
+        position="absolute" 
+        bottom="2" 
+        fontSize="xs" 
+        opacity={0.7}
+        textShadow="0px 1px 2px rgba(0, 0, 0, 0.5)"
+      >
+        {tokenId.slice(0, 8)}...
+      </Text>
+    </Center>
   );
 };
 
@@ -170,9 +192,11 @@ export const CollectionBadge: React.FC<CollectionBadgeProps> = ({
   collection,
   ...props
 }) => {
+  const redAccent = useColorModeValue('ergnome.redAccent.light', 'ergnome.red');
+  
   return (
     <Box
-      bg="red.600"
+      bg={redAccent}
       color="white"
       fontWeight="bold"
       fontSize="xs"
@@ -197,10 +221,12 @@ export const TokenAmount: React.FC<TokenAmountProps> = ({
   formatted = '0',
   ...props
 }) => {
+  const orangeAccent = useColorModeValue('ergnome.orangeAccent.light', 'ergnome.orange');
+  
   return (
     <Flex justify="space-between" bg={useColorModeValue('blue.50', 'blue.900')} p={2} borderRadius="md">
       <Text fontWeight="bold" fontSize="sm">Amount:</Text>
-      <Text fontSize="sm" color="orange.500" fontWeight="bold" {...props}>
+      <Text fontSize="sm" color={orangeAccent} fontWeight="bold" {...props}>
         {formatted || '0'}
       </Text>
     </Flex>

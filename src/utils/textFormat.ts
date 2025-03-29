@@ -71,4 +71,59 @@ export const tokenCardStyles = {
   hoverTransform: 'translateY(-8px) rotateZ(1deg)',
   hoverShadow: '0px 8px 20px rgba(0, 0, 0, 0.3)',
   imageHeight: "180px"
+};
+
+/**
+ * Formats a token amount with the correct number of decimal places
+ * @param amount The token amount to format
+ * @param decimals The number of decimal places
+ * @returns Formatted token amount string
+ */
+export const formatTokenAmount = (amount: number, decimals: number = 0): string => {
+  const divisor = Math.pow(10, decimals);
+  const formattedAmount = (amount / divisor).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals
+  });
+  return formattedAmount;
+};
+
+/**
+ * Checks if a string is a valid URL
+ * @param str The string to check
+ * @returns boolean indicating if the string is a valid URL
+ */
+export const isUrl = (str: string): boolean => {
+  try {
+    new URL(str);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Truncates a string to a specified length
+ * @param str The string to truncate
+ * @param length The maximum length
+ * @returns Truncated string with ellipsis if needed
+ */
+export const truncateString = (str: string, length: number): string => {
+  if (str.length <= length) return str;
+  return str.slice(0, length) + '...';
+};
+
+/**
+ * Checks if a string is valid JSON
+ * @param str The string to check
+ * @returns boolean indicating if the string is valid JSON
+ */
+export const isValidJson = (str: string): boolean => {
+  if (!str) return false;
+  try {
+    JSON.parse(str);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }; 

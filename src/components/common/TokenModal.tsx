@@ -17,13 +17,14 @@ import {
   Flex,
   useColorModeValue,
   SimpleGrid,
-  Badge
+  Badge,
+  useColorMode
 } from '@chakra-ui/react';
 import { FaShare } from 'react-icons/fa';
 import { formatTokenAmount } from '../../utils/ergo';
 import { is721Metadata } from '../../utils/ergo';
 import { TokenData } from './TokenCard';
-import { PlaceholderImage, CollectionBadge } from './TextElements';
+import { PlaceholderImage, CollectionBadge, AddressText } from './TextElements';
 
 interface TokenModalProps {
   token: TokenData | null;
@@ -42,6 +43,8 @@ export const TokenModal: React.FC<TokenModalProps> = ({
   const modalBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gold', 'yellow.600');
   const attributeBg = useColorModeValue('gray.100', 'gray.700');
+  const orangeAccent = useColorModeValue('ergnome.orangeAccent.light', 'ergnome.orange');
+  const { colorMode } = useColorMode();
   
   if (!token) return null;
 
@@ -91,7 +94,9 @@ export const TokenModal: React.FC<TokenModalProps> = ({
           <Heading
             size="lg"
             fontFamily="serif"
-            bgGradient="linear(to-r, orange.400, red.500)"
+            bgGradient={colorMode === 'light' 
+              ? "linear(to-r, ergnome.orangeAccent.light, ergnome.redAccent.light)" 
+              : "linear(to-r, orange.400, red.500)"}
             bgClip="text"
           >
             {name || 'Unknown Token'}
@@ -184,14 +189,16 @@ export const TokenModal: React.FC<TokenModalProps> = ({
               <VStack align="stretch" spacing={3}>
                 <Flex justify="space-between">
                   <Text fontWeight="bold">Token ID:</Text>
-                  <Text fontFamily="mono" fontSize="sm">
-                    {tokenId}
-                  </Text>
+                  <AddressText 
+                    address={tokenId} 
+                    isTokenId={true}
+                    fontSize="sm"
+                  />
                 </Flex>
 
                 <Flex justify="space-between">
                   <Text fontWeight="bold">Amount:</Text>
-                  <Text fontWeight="bold" color="orange.500">
+                  <Text fontWeight="bold" color={orangeAccent}>
                     {formatTokenAmount(amount, decimals || 0)}
                   </Text>
                 </Flex>

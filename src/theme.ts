@@ -3,12 +3,41 @@ import { extendTheme, ThemeConfig } from "@chakra-ui/react";
 // Custom colors for the Ergo theme
 const colors = {
   ergnome: {
+    // Base colors (for backward compatibility)
     purple: "#6247aa",
     blue: "#419dd9",
     green: "#53ba83",
     yellow: "#f5cb5c",
-    orange: "#e8871e",
+    orange: "#e8871e", 
     red: "#e15554",
+    
+    // Variants for light/dark mode with better contrast
+    purpleAccent: {
+      light: "#4a2b99",  // Darker purple for light mode
+      dark: "#6247aa"    // Original purple for dark mode
+    },
+    blueAccent: {
+      light: "#2c7fb8",  // Darker blue for light mode
+      dark: "#419dd9"    // Original blue for dark mode
+    },
+    greenAccent: {
+      light: "#2f9d64",  // Darker green for light mode
+      dark: "#53ba83"    // Original green for dark mode
+    },
+    yellowAccent: {
+      light: "#d4a91d",  // Darker yellow for light mode
+      dark: "#f5cb5c"    // Original yellow for dark mode
+    },
+    orangeAccent: {
+      light: "#c4690d",  // Darker orange for light mode
+      dark: "#e8871e"    // Original orange for dark mode
+    },
+    redAccent: {
+      light: "#c13f3e",  // Darker red for light mode
+      dark: "#e15554"    // Original red for dark mode
+    },
+    
+    // Existing color mode variations
     bg: {
       light: "#94a3b8",  // Medium gray for light mode background
       dark: "#111827"    // Current dark color

@@ -7,6 +7,7 @@ import { WalletConnector } from './components/wallet/WalletConnector';
 import { WalletDashboard } from './components/wallet/WalletDashboard';
 import NFTGalleryPage from './pages/NFTGalleryPage';
 import { WalletProvider } from './context/WalletContext';
+import RosenBridgeTest from './components/RosenBridgeTest';
 
 export const App = () => {
   // Ref to trigger wallet connect from components that need it
@@ -21,12 +22,14 @@ export const App = () => {
             navbarRightComponent={<WalletConnector ref={connectWalletRef} />}
             navLinks={[
               { label: 'Dashboard', to: '/' },
-              { label: 'NFT Gallery', to: '/nft-gallery' }
+              { label: 'NFT Gallery', to: '/nft-gallery' },
+              { label: 'Metadata Test', to: '/rosen-test' }
             ]}
           >
             <Routes>
               <Route path="/" element={<WalletDashboard />} />
               <Route path="/nft-gallery" element={<NFTGalleryPage />} />
+              <Route path="/rosen-test" element={<RosenBridgeTest />} />
             </Routes>
           </PageLayout>
         </Router>
