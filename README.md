@@ -77,77 +77,95 @@ A modular React template for building applications on the Ergo blockchain. This 
 
 Ergo is a [Tier 3 chain on Dynamic](https://docs.dynamic.xyz/overview/wallets-and-chains/tier-3-chains)
 — there is no native Ergo connector. This template ships a Tier 3
-integration that lets users:
+integration with two paths:
 
-**(A) Sign in with email** and get a Dynamic-derived Ergo wallet, or
-**(B) Connect an existing Nautilus wallet** over EIP-12.
+- **(A) Sign in with email** → get a self-custodial Ergo wallet whose
+  private key is generated locally, encrypted with a hardware-backed
+  passkey (WebAuthn PRF), and mirrored encrypted into your Dynamic
+  user metadata so it survives across devices.
+- **(B) Connect an existing Nautilus wallet** over EIP-12.
 
-### Email → Ergo flow
+### Email → Ergo flow (Option B+ in the security analysis)
 
-Because Ergo uses secp256k1 (the same curve as Ethereum), we use Dynamic's
-EVM embedded wallet as the signing root and derive an Ergo identity from
-it. The full flow lives in [`src/lib/ergoFromDynamic.ts`](src/lib/ergoFromDynamic.ts):
+This is the production flow. Dynamic is used **only** for identity,
+session, and encrypted-blob storage — it never sees the Ergo private
+key in any form.
 
-1. The user signs in with email through `<DynamicWidget />`. Dynamic
-   provisions an embedded EVM wallet for the account.
-2. We call `primaryWallet.signMessage("Derive Ergo address v1")` to get
-   an EIP-191 personal-signed signature.
-3. `viem`'s `recoverPublicKey` recovers the **uncompressed** secp256k1
-   public key from the signature.
-4. We compress that key to its 33-byte SEC1 form (`0x02`/`0x03` prefix
-   + X coordinate).
-5. `ergo-lib-wasm-browser`'s `Address.from_public_key(...)` builds a
-   P2PK mainnet address. We render its base58 string in the UI.
+1. User signs in via `<DynamicWidget />`. Dynamic provisions an embedded
+   EVM wallet for the account, but we ignore that wallet's signing
+   capabilities entirely.
+2. **First time on this account:** we generate a fresh 32-byte Ergo
+   secret with `crypto.getRandomValues`, register a platform passkey
+   for the current origin (with the WebAuthn PRF extension), derive an
+   AES-GCM-256 key from `HKDF(prfOutput)`, and double-encrypt the
+   secret:
+   - once with that passkey-derived AES key
+   - once with `PBKDF2(recoveryPhrase, 250_000)` over a fresh BIP-39
+     24-word phrase shown to the user **exactly once**
+   The resulting `{ ciphertext, iv, salt, passkeyCredId }` blob is
+   saved to `localStorage` and mirrored to Dynamic user metadata via
+   `updateUser({ metadata: { ergoVaultV1: ... } })`.
+3. **Every subsequent unlock / sign:** `navigator.credentials.get()`
+   triggers a biometric / device-PIN prompt. The PRF output decrypts
+   the Ergo secret in memory, sigma-rust signs the transaction, the
+   secret is wiped (`Uint8Array.fill(0)`) immediately afterward.
+4. **Cross-device recovery:** sign in to Dynamic on the new device →
+   if the device has the synced passkey (iCloud Keychain / Google
+   Password Manager), unlock works immediately. Otherwise, paste the
+   24-word recovery phrase, and we automatically register a fresh
+   passkey on the new device while we have the secret in memory.
 
-The address derivation is deterministic — signing the same message
-always produces the same compressed public key, which always maps to
-the same Ergo P2PK address. Users can receive ERG and tokens at the
-derived address immediately.
+#### Why this is more secure than "derive seed from signMessage"
 
-### ⚠️ Caveat: signing transactions
+| Threat                | "Seed from signMessage"               | This template (passkey + recovery)  |
+|-----------------------|----------------------------------------|--------------------------------------|
+| Phishing              | Any dapp that gets you to sign that one string steals the seed forever | WebAuthn credentials are origin-bound by the browser; cross-site sites cannot use them |
+| Insider at Dynamic    | Can replay your sigMessage, re-derive the seed | Has only your encrypted blob; lacks passkey + recovery phrase |
+| XSS in this app       | Can compute the seed on demand        | Can request decryption but biometric prompt gates each operation |
+| Lost device           | Email recovery works                   | Synced passkey OR recovery phrase    |
+| Server breach         | N/A                                    | N/A — no server holds keys           |
 
-Ergo P2PK proofs are **Schnorr-style sigma protocol** proofs, not raw
-secp256k1 ECDSA signatures over the sighash. Dynamic's EVM embedded
-wallet only exposes ECDSA signing primitives (`signMessage`,
-`signRawMessage`), so a faithful Tier 3 implementation cannot simply
-"ECDSA-sign the digest and slot the bytes in as the proof".
+#### File map
 
-`signErgoTx` in `src/lib/ergoFromDynamic.ts` follows the structure
-described in the Dynamic Tier 3 docs (compute digest → `signRawMessage`
-→ attach as proof) so the UI flow is wired end-to-end, but the
-resulting transaction will **not** validate on Ergo mainnet. The
-broadcast step in the UI is therefore expected to be rejected by the
-network until one of the following is in place:
+| File                                | Purpose                                                                        |
+|-------------------------------------|--------------------------------------------------------------------------------|
+| `src/lib/DynamicProvider.tsx`       | Wraps the app in `DynamicContextProvider` with `EthereumWalletConnectors`.     |
+| `src/lib/passkey.ts`                | WebAuthn PRF helpers (`registerPasskey`, `evaluatePrf`, `aesGcm{En,De}crypt`). |
+| `src/lib/ergoKeyVault.ts`           | `provisionVault`, `unlockWithPasskey`, `unlockWithRecoveryPhrase`, `attachPasskey`. |
+| `src/lib/vaultStorage.ts`           | localStorage adapter + Dynamic user-metadata patch builders.                   |
+| `src/lib/ergoSigning.ts`            | `sendErg(...)` — real Schnorr sign via `Wallet.from_secrets`, then submit.     |
+| `src/lib/ergoFromDynamic.ts`        | Legacy Tier 3 derivation reference (`deriveErgoAddress`, `signErgoTx`).        |
+| `src/components/ErgoWallet.tsx`     | UI state machine for the vault flow + Send-ERG form.                           |
+| `src/components/NautilusButton.tsx` | Direct EIP-12 Nautilus connect.                                                |
+| `craco.config.js`                   | WASM + Node polyfill webpack overrides for CRA.                                |
+| `.env.example`                      | `REACT_APP_DYNAMIC_ENV_ID` / `NEXT_PUBLIC_DYNAMIC_ENV_ID`.                     |
 
-- a server-side Schnorr signer that holds the same secret derived from
-  the Dynamic embedded wallet, or
-- a [Custom Wallet Connector](https://docs.dynamic.xyz/wallets/advanced-wallets/custom-wallets)
-  fork of `@dynamic-labs/wallet-connectors` that implements Ergo's
-  proof format directly (tracked as a follow-up).
+### Browser support for the passkey path
 
-Until then, **broadcasting transactions should use Nautilus**.
+WebAuthn PRF is the only piece with non-universal support:
 
-### Nautilus flow
+- ✅ Chrome / Edge (desktop & Android)
+- ✅ Safari 18+ (macOS Sonoma+, iOS 18+)
+- ⚠️ Firefox: PRF support is partial; users on stable Firefox will see
+  a "passkey vault unavailable" banner and should use the Nautilus
+  path instead.
+
+### Future hardening: 2-of-2 MPC
+
+The next-tier security model would split the Ergo secret into two
+shares — one client-held, one server-held — and use additive 2-party
+Schnorr. Neither share alone can sign. Schnorr-on-Ergo happens to be
+unusually well-suited to this (no Paillier/OT machinery needed). Out
+of scope for this template, but tracked as a follow-up if you build a
+real product on top.
+
+### Nautilus flow (parallel path)
 
 `src/components/NautilusButton.tsx` detects `window.ergoConnector.nautilus`,
-calls `connect()`, and uses the EIP-12 dApp protocol directly (so it
-sidesteps Dynamic entirely). This path is fully functional today.
-
-A Dynamic-native Nautilus connector would require forking
-`@dynamic-labs/wallet-connectors` and implementing a Custom Wallet
-Connector that bridges Dynamic's `WalletConnector` interface to
-Nautilus's EIP-12 surface. That is intentionally left as a follow-up.
-
-### Files added by the Dynamic integration
-
-| File                                  | Purpose                                                                 |
-|---------------------------------------|-------------------------------------------------------------------------|
-| `src/lib/DynamicProvider.tsx`         | Wraps the app in `DynamicContextProvider` with `EthereumWalletConnectors`. |
-| `src/lib/ergoFromDynamic.ts`          | `deriveErgoAddress` + `signErgoTx` (Tier 3 helpers).                    |
-| `src/components/ErgoWallet.tsx`       | UI for the email → Ergo flow (widget, balance, send form).              |
-| `src/components/NautilusButton.tsx`   | Direct EIP-12 Nautilus connect button.                                  |
-| `craco.config.js`                     | WASM + Node polyfill webpack overrides for CRA.                         |
-| `.env.example`                        | `REACT_APP_DYNAMIC_ENV_ID` / `NEXT_PUBLIC_DYNAMIC_ENV_ID`.              |
+calls `connect()`, and uses the EIP-12 dApp protocol directly so it
+sidesteps Dynamic entirely. A Dynamic-native Custom Wallet Connector
+for Nautilus would require forking `@dynamic-labs/wallet-connectors`
+and is left as a follow-up.
 
 ## 🚂 Deploying to Railway
 

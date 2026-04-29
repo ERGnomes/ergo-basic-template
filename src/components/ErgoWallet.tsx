@@ -1,5 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
+  Badge,
   Box,
   Button,
   Code,
@@ -10,6 +15,7 @@ import {
   Spinner,
   Stack,
   Text,
+  Textarea,
   VStack,
   useColorMode,
   useToast,
@@ -17,19 +23,30 @@ import {
 import {
   DynamicWidget,
   useDynamicContext,
+  useUserUpdateRequest,
 } from "@dynamic-labs/sdk-react-core";
 import { isEthereumWallet } from "@dynamic-labs/ethereum";
 import {
-  deriveErgoAddress,
-  signErgoTx,
-  DerivedErgoIdentity,
-  DynamicPrimaryWalletLike,
-} from "../lib/ergoFromDynamic";
+  ErgoSecretBytes,
+  attachPasskey,
+  findExistingVault,
+  provisionVault,
+  unlockWithPasskey,
+  unlockWithRecoveryPhrase,
+  wipeLocalVault,
+} from "../lib/ergoKeyVault";
+import {
+  buildDynamicMetadataPatch,
+  buildDynamicMetadataClearPatch,
+  saveVaultToLocalStorage,
+  VaultRecord,
+} from "../lib/vaultStorage";
+import { isPlatformAuthenticatorAvailable } from "../lib/passkey";
+import { sendErg } from "../lib/ergoSigning";
 import { NautilusButton } from "./NautilusButton";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 const NANOERG_PER_ERG = 1_000_000_000;
-const DEFAULT_FEE_NANOERG = 1_100_000;
 
 interface ErgoBalance {
   nanoErgs: string;
@@ -60,91 +77,218 @@ const formatErg = (nano: string | number) => {
   return `${whole}.${frac.toString().padStart(9, "0")}`;
 };
 
+type VaultState =
+  | { kind: "idle" }
+  | { kind: "needs-login" }
+  | { kind: "needs-platform-auth" }
+  | { kind: "no-vault" }
+  | { kind: "locked"; vault: VaultRecord; passkeyAvailable: boolean }
+  | { kind: "unlocked"; vault: VaultRecord }
+  | { kind: "unsupported"; reason: string };
+
 export const ErgoWallet: React.FC = () => {
   const { colorMode } = useColorMode();
   const toast = useToast();
   const { primaryWallet, user } = useDynamicContext();
+  const { updateUser } = useUserUpdateRequest();
 
-  const [identity, setIdentity] = useState<DerivedErgoIdentity | null>(null);
-  const [deriving, setDeriving] = useState(false);
+  const [vault, setVault] = useState<VaultRecord | null>(null);
+  const [vaultState, setVaultState] = useState<VaultState>({ kind: "idle" });
+  const [busy, setBusy] = useState(false);
+  const [showRecoveryPhrase, setShowRecoveryPhrase] = useState<string | null>(null);
+  const [recoveryPhraseInput, setRecoveryPhraseInput] = useState("");
+  const [showRecoveryUnlock, setShowRecoveryUnlock] = useState(false);
+
   const [balance, setBalance] = useState<ErgoBalance | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [recipient, setRecipient] = useState("");
   const [amountErg, setAmountErg] = useState("");
   const [sending, setSending] = useState(false);
-  const [lastTxResult, setLastTxResult] = useState<string | null>(null);
+  const [lastSubmit, setLastSubmit] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // We type-narrow to the EVM wallet shape we depend on.
-  const evmWallet = useMemo<DynamicPrimaryWalletLike | null>(() => {
-    if (!primaryWallet) return null;
-    if (!isEthereumWallet(primaryWallet)) return null;
-    return primaryWallet as unknown as DynamicPrimaryWalletLike;
-  }, [primaryWallet]);
+  const isEvm = useMemo(
+    () => Boolean(primaryWallet && isEthereumWallet(primaryWallet)),
+    [primaryWallet]
+  );
 
-  // Auto-derive once the user is logged in with an EVM-capable wallet.
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      if (!evmWallet || identity || deriving) return;
-      setDeriving(true);
-      try {
-        const derived = await deriveErgoAddress(evmWallet);
-        if (!cancelled) setIdentity(derived);
-      } catch (err: any) {
-        if (!cancelled) {
-          toast({
-            title: "Could not derive Ergo address",
-            description: err?.message || String(err),
-            status: "error",
-            duration: 6000,
-            isClosable: true,
-          });
-        }
-      } finally {
-        if (!cancelled) setDeriving(false);
+  const refreshVaultState = useCallback(async () => {
+    if (!user) {
+      setVaultState({ kind: "needs-login" });
+      setVault(null);
+      return;
+    }
+    const platformOk = await isPlatformAuthenticatorAvailable();
+    const found = findExistingVault(user as any);
+    setVault(found);
+    if (!found) {
+      if (!platformOk) {
+        setVaultState({
+          kind: "unsupported",
+          reason:
+            "No platform authenticator (Touch ID / Windows Hello / Android biometric) is available in this browser. " +
+              "You can still use the Nautilus path below, or open this URL on a device with a passkey.",
+        });
+      } else {
+        setVaultState({ kind: "no-vault" });
       }
-    };
-    run();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [evmWallet]);
+    } else {
+      setVaultState({
+        kind: "locked",
+        vault: found,
+        passkeyAvailable: Boolean(found.passkey && found.passkeyEncrypted),
+      });
+    }
+  }, [user]);
 
-  // Refresh balance whenever the derived address changes.
   useEffect(() => {
-    if (!identity) {
+    refreshVaultState();
+  }, [refreshVaultState]);
+
+  useEffect(() => {
+    if (vaultState.kind !== "unlocked") {
       setBalance(null);
       return;
     }
     let cancelled = false;
     setBalanceLoading(true);
-    fetchBalance(identity.ergoAddress)
-      .then((b) => {
-        if (!cancelled) setBalance(b);
-      })
+    fetchBalance(vaultState.vault.ergoAddress)
+      .then((b) => !cancelled && setBalance(b))
       .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setBalanceLoading(false);
-      });
+      .finally(() => !cancelled && setBalanceLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [identity]);
+  }, [vaultState]);
 
-  const handleRefreshBalance = async () => {
-    if (!identity) return;
-    setBalanceLoading(true);
+  const persistVaultToDynamic = useCallback(
+    async (rec: VaultRecord) => {
+      try {
+        await updateUser({
+          metadata: buildDynamicMetadataPatch(
+            (user?.metadata as Record<string, unknown> | undefined),
+            rec
+          ),
+        });
+      } catch (err: any) {
+        // Mirror failure is non-fatal — we still have the local copy.
+        toast({
+          title: "Vault saved locally only",
+          description:
+            "Could not mirror the encrypted blob to your Dynamic profile " +
+            "(" +
+            (err?.message || String(err)) +
+            "). Cross-device recovery will be unavailable until the next save.",
+          status: "warning",
+          duration: 6000,
+          isClosable: true,
+        });
+      }
+    },
+    [updateUser, user, toast]
+  );
+
+  const handleProvision = async () => {
+    if (!user) return;
+    setBusy(true);
     try {
-      const b = await fetchBalance(identity.ergoAddress);
-      setBalance(b);
+      const identifier =
+        (user as any).email ||
+        (user as any).userId ||
+        (user as any).id ||
+        "ergo-vault-user";
+      const display = (user as any).email || "Ergo Vault";
+      const { vault: newVault, recoveryPhrase } = await provisionVault(
+        identifier,
+        display
+      );
+      setVault(newVault);
+      setShowRecoveryPhrase(recoveryPhrase);
+      await persistVaultToDynamic(newVault);
+      setVaultState({
+        kind: "locked",
+        vault: newVault,
+        passkeyAvailable: Boolean(newVault.passkey),
+      });
+    } catch (err: any) {
+      toast({
+        title: "Could not provision vault",
+        description: err?.message || String(err),
+        status: "error",
+        duration: 8000,
+        isClosable: true,
+      });
     } finally {
-      setBalanceLoading(false);
+      setBusy(false);
+    }
+  };
+
+  const handleUnlockWithPasskey = async () => {
+    if (!vault) return;
+    setBusy(true);
+    let secret: ErgoSecretBytes | null = null;
+    try {
+      secret = await unlockWithPasskey(vault);
+      setVaultState({ kind: "unlocked", vault });
+      // We immediately wipe the secret — sending will re-unlock when needed.
+    } catch (err: any) {
+      toast({
+        title: "Unlock failed",
+        description: err?.message || String(err),
+        status: "error",
+        duration: 6000,
+        isClosable: true,
+      });
+    } finally {
+      secret?.wipe();
+      setBusy(false);
+    }
+  };
+
+  const handleUnlockWithRecovery = async () => {
+    if (!vault || !recoveryPhraseInput.trim()) return;
+    setBusy(true);
+    let secret: ErgoSecretBytes | null = null;
+    try {
+      secret = await unlockWithRecoveryPhrase(vault, recoveryPhraseInput);
+      const platformOk = await isPlatformAuthenticatorAvailable();
+      if (platformOk && (!vault.passkey || !vault.passkeyEncrypted)) {
+        // Re-attach a passkey on this device for next time.
+        const identifier =
+          (user as any)?.email ||
+          (user as any)?.userId ||
+          (user as any)?.id ||
+          "ergo-vault-user";
+        const next = await attachPasskey(
+          vault,
+          secret,
+          identifier,
+          (user as any)?.email || "Ergo Vault"
+        );
+        setVault(next);
+        await persistVaultToDynamic(next);
+        setVaultState({ kind: "unlocked", vault: next });
+      } else {
+        setVaultState({ kind: "unlocked", vault });
+      }
+      setShowRecoveryUnlock(false);
+      setRecoveryPhraseInput("");
+      toast({ title: "Recovered", status: "success", duration: 3000 });
+    } catch (err: any) {
+      toast({
+        title: "Recovery failed",
+        description: err?.message || String(err),
+        status: "error",
+        duration: 6000,
+        isClosable: true,
+      });
+    } finally {
+      secret?.wipe();
+      setBusy(false);
     }
   };
 
   const handleSendErg = async () => {
-    if (!identity || !evmWallet) return;
+    if (vaultState.kind !== "unlocked" || !vault) return;
     if (!recipient.trim()) {
       toast({ title: "Recipient required", status: "warning" });
       return;
@@ -155,75 +299,32 @@ export const ErgoWallet: React.FC = () => {
       return;
     }
     setSending(true);
-    setLastTxResult(null);
-
+    setLastSubmit(null);
+    let secret: ErgoSecretBytes | null = null;
     try {
-      const amountNano = BigInt(Math.floor(amountFloat * NANOERG_PER_ERG));
-
-      // Build the unsigned transaction with Fleet SDK using the Explorer's
-      // current UTXO set for the derived address.
-      const utxoRes = await fetch(
-        `${ERGO_API}/boxes/unspent/byAddress/${encodeURIComponent(identity.ergoAddress)}?limit=50`
-      );
-      if (!utxoRes.ok) throw new Error("Failed to fetch unspent boxes");
-      const utxoJson = await utxoRes.json();
-      const inputs = (utxoJson.items || []) as any[];
-      if (inputs.length === 0) throw new Error("No unspent boxes at derived address");
-
-      const heightRes = await fetch(`${ERGO_API}/blocks?limit=1`);
-      const heightJson = await heightRes.json();
-      const currentHeight: number =
-        heightJson?.items?.[0]?.height || heightJson?.[0]?.height || 0;
-
-      const fleet = await import("@fleet-sdk/core");
-      const { TransactionBuilder, OutputBuilder, RECOMMENDED_MIN_FEE_VALUE } =
-        fleet as any;
-
-      const fee =
-        typeof RECOMMENDED_MIN_FEE_VALUE !== "undefined"
-          ? RECOMMENDED_MIN_FEE_VALUE
-          : DEFAULT_FEE_NANOERG;
-
-      const builder = new TransactionBuilder(currentHeight)
-        .from(inputs)
-        .to(new OutputBuilder(amountNano, recipient.trim()))
-        .sendChangeTo(identity.ergoAddress)
-        .payFee(fee);
-
-      const unsignedTx = builder.build().toEIP12Object();
-
-      const { signedTxJson } = await signErgoTx(evmWallet, unsignedTx, inputs);
-
-      // Best-effort submit via Explorer. Will likely fail because Ergo
-      // P2PK proofs are Schnorr, not raw ECDSA — see the caveat in
-      // `lib/ergoFromDynamic.ts`. We surface the error to the UI.
-      const submitRes = await fetch(`${ERGO_API}/mempool/transactions/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(signedTxJson),
+      secret = await unlockWithPasskey(vault);
+      const result = await sendErg({
+        fromAddress: vault.ergoAddress,
+        toAddress: recipient.trim(),
+        amountNanoErg: BigInt(Math.floor(amountFloat * NANOERG_PER_ERG)),
+        secret,
       });
-
-      const submitText = await submitRes.text();
-      if (!submitRes.ok) {
-        setLastTxResult(`HTTP ${submitRes.status}: ${submitText}`);
-        toast({
-          title: "Submit rejected (expected for stub Schnorr proof)",
-          description:
-            "See the Tier 3 caveat in lib/ergoFromDynamic.ts — connect Nautilus to actually broadcast.",
-          status: "warning",
-          duration: 8000,
-          isClosable: true,
-        });
-      } else {
-        setLastTxResult(submitText);
-        toast({
-          title: "Submitted",
-          description: submitText.slice(0, 80),
-          status: "success",
-          duration: 6000,
-          isClosable: true,
-        });
-        handleRefreshBalance();
+      setLastSubmit({ ok: result.submitOk, text: result.submitResponse });
+      toast({
+        title: result.submitOk ? "Submitted" : "Submit rejected",
+        description: result.submitOk
+          ? `Tx ${result.txId.slice(0, 12)}…`
+          : result.submitResponse.slice(0, 100),
+        status: result.submitOk ? "success" : "error",
+        duration: 6000,
+        isClosable: true,
+      });
+      if (result.submitOk) {
+        setRecipient("");
+        setAmountErg("");
+        setTimeout(() => {
+          fetchBalance(vault.ergoAddress).then(setBalance).catch(() => undefined);
+        }, 5000);
       }
     } catch (err: any) {
       toast({
@@ -234,8 +335,26 @@ export const ErgoWallet: React.FC = () => {
         isClosable: true,
       });
     } finally {
+      secret?.wipe();
       setSending(false);
     }
+  };
+
+  const handleForgetVault = async () => {
+    wipeLocalVault();
+    try {
+      await updateUser({
+        metadata: buildDynamicMetadataClearPatch(
+          (user?.metadata as Record<string, unknown> | undefined)
+        ),
+      });
+    } catch {
+      // ignore — local clear succeeded.
+    }
+    setVault(null);
+    setShowRecoveryPhrase(null);
+    setVaultState(user ? { kind: "no-vault" } : { kind: "needs-login" });
+    toast({ title: "Vault forgotten", status: "info", duration: 3000 });
   };
 
   return (
@@ -251,128 +370,238 @@ export const ErgoWallet: React.FC = () => {
       <VStack align="stretch" spacing={5}>
         <Heading size="md">Sign in with Dynamic.xyz</Heading>
         <Text fontSize="sm" opacity={0.8}>
-          Ergo is a Dynamic Tier 3 chain — there is no native Ergo connector.
-          We sign in with the embedded EVM wallet, then deterministically
-          derive an Ergo P2PK address from its secp256k1 public key. See
-          <Code mx={1}>src/lib/ergoFromDynamic.ts</Code> for details.
+          Ergo is a Dynamic Tier 3 chain. We use Dynamic only for email
+          login + cross-device storage of an encrypted blob. The actual
+          Ergo private key is generated locally, encrypted with a
+          hardware-backed passkey (WebAuthn PRF), and only ever
+          decrypted in memory while signing a transaction.
         </Text>
 
         <DynamicWidget />
 
-        {primaryWallet && !evmWallet && (
-          <Text color="orange.400" fontSize="sm">
-            The connected primary wallet is not an EVM-capable wallet, so we
-            cannot derive an Ergo address from it. Try logging in with email
-            (which provisions a Dynamic embedded EVM wallet).
+        {primaryWallet && !isEvm && (
+          <Alert status="warning" borderRadius="md">
+            <AlertIcon />
+            <AlertDescription fontSize="sm">
+              The connected primary wallet is not EVM-capable. Sign in
+              with email instead so Dynamic provisions an embedded EVM
+              wallet — that's what gates access to your encrypted Ergo
+              vault.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {vaultState.kind === "needs-login" && (
+          <Text fontSize="sm" opacity={0.7}>
+            Sign in above to provision or unlock your Ergo vault.
           </Text>
         )}
 
-        {evmWallet && (
+        {vaultState.kind === "unsupported" && (
+          <Alert status="warning" borderRadius="md">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Passkey vault unavailable on this browser</AlertTitle>
+              <AlertDescription fontSize="sm">{vaultState.reason}</AlertDescription>
+            </Box>
+          </Alert>
+        )}
+
+        {vaultState.kind === "no-vault" && (
+          <Stack
+            borderWidth="1px"
+            borderRadius="md"
+            p={4}
+            spacing={3}
+            borderColor={colorMode === "light" ? "gray.200" : "whiteAlpha.300"}
+          >
+            <Heading size="sm">Provision your Ergo vault</Heading>
+            <Text fontSize="sm" opacity={0.85}>
+              We'll generate a fresh Ergo private key in your browser,
+              encrypt it with a passkey on this device, and back up an
+              encrypted copy plus a 24-word recovery phrase to your
+              Dynamic profile. Your browser will prompt you for
+              biometrics / device PIN to register the passkey.
+            </Text>
+            <Button colorScheme="blue" onClick={handleProvision} isLoading={busy}>
+              Provision vault with passkey
+            </Button>
+          </Stack>
+        )}
+
+        {showRecoveryPhrase && (
+          <Alert
+            status="success"
+            variant="left-accent"
+            borderRadius="md"
+            flexDirection="column"
+            alignItems="flex-start"
+          >
+            <HStack>
+              <AlertIcon />
+              <AlertTitle>Save your recovery phrase NOW</AlertTitle>
+            </HStack>
+            <AlertDescription fontSize="sm" mt={2}>
+              This is the ONLY way to recover your Ergo wallet if you
+              lose access to your passkey on every device. Write it down
+              physically. We will not show it again.
+            </AlertDescription>
+            <Code
+              w="100%"
+              mt={3}
+              p={3}
+              fontSize="sm"
+              whiteSpace="pre-wrap"
+              wordBreak="break-word"
+            >
+              {showRecoveryPhrase}
+            </Code>
+            <Button mt={3} size="sm" onClick={() => setShowRecoveryPhrase(null)}>
+              I've saved it — dismiss
+            </Button>
+          </Alert>
+        )}
+
+        {vaultState.kind === "locked" && (
           <Stack spacing={3}>
-            <Heading size="sm">Derived Ergo identity</Heading>
-            {deriving ? (
-              <HStack>
-                <Spinner size="sm" />
-                <Text fontSize="sm">Asking your wallet to sign…</Text>
-              </HStack>
-            ) : identity ? (
-              <Stack spacing={1} fontSize="sm">
-                <Text>
-                  <strong>Ergo address:</strong>
-                </Text>
-                <Code wordBreak="break-all">{identity.ergoAddress}</Code>
-                <Text mt={2}>
-                  <strong>Compressed pubkey:</strong>
-                </Text>
-                <Code wordBreak="break-all" fontSize="xs">
-                  {identity.compressedPublicKeyHex}
-                </Code>
+            <Heading size="sm">Vault</Heading>
+            <Text fontSize="sm">
+              <strong>Address:</strong>{" "}
+              <Code>{vaultState.vault.ergoAddress}</Code>
+            </Text>
+            <HStack spacing={3}>
+              {vaultState.passkeyAvailable && (
+                <Button
+                  colorScheme="blue"
+                  onClick={handleUnlockWithPasskey}
+                  isLoading={busy}
+                >
+                  Unlock with passkey
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => setShowRecoveryUnlock((s) => !s)}
+              >
+                Use recovery phrase
+              </Button>
+              <Button variant="ghost" colorScheme="red" onClick={handleForgetVault}>
+                Forget vault
+              </Button>
+            </HStack>
+            {showRecoveryUnlock && (
+              <Stack spacing={2}>
+                <Textarea
+                  placeholder="24 recovery words separated by spaces"
+                  value={recoveryPhraseInput}
+                  onChange={(e) => setRecoveryPhraseInput(e.target.value)}
+                  fontFamily="mono"
+                  fontSize="sm"
+                  rows={3}
+                />
+                <Button
+                  onClick={handleUnlockWithRecovery}
+                  isLoading={busy}
+                  isDisabled={!recoveryPhraseInput.trim()}
+                >
+                  Unlock & re-attach passkey
+                </Button>
               </Stack>
-            ) : (
-              <Text fontSize="sm" opacity={0.7}>
-                Sign the derivation message to reveal your Ergo address.
-              </Text>
             )}
+          </Stack>
+        )}
 
-            {identity && (
-              <>
-                <HStack justify="space-between" mt={2}>
-                  <Heading size="sm">Balance</Heading>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={handleRefreshBalance}
-                    isLoading={balanceLoading}
-                  >
-                    Refresh
-                  </Button>
-                </HStack>
-                {balanceLoading && !balance ? (
-                  <Spinner size="sm" />
+        {vaultState.kind === "unlocked" && (
+          <Stack spacing={3}>
+            <HStack justify="space-between">
+              <Heading size="sm">Ergo wallet</Heading>
+              <Badge colorScheme="green">unlocked</Badge>
+            </HStack>
+            <Text fontSize="sm">
+              <strong>Address:</strong>{" "}
+              <Code>{vaultState.vault.ergoAddress}</Code>
+            </Text>
+            <HStack justify="space-between">
+              <Text fontSize="sm">
+                <strong>Balance:</strong>{" "}
+                {balanceLoading ? (
+                  <Spinner size="xs" />
                 ) : balance ? (
-                  <Stack spacing={1} fontSize="sm">
-                    <Text>
-                      <strong>{formatErg(balance.nanoErgs)}</strong> ERG
-                    </Text>
-                    {balance.tokens.length > 0 && (
-                      <Text fontSize="xs" opacity={0.8}>
-                        {balance.tokens.length} token
-                        {balance.tokens.length === 1 ? "" : "s"} held
-                      </Text>
-                    )}
-                  </Stack>
+                  `${formatErg(balance.nanoErgs)} ERG`
                 ) : (
-                  <Text fontSize="sm" opacity={0.7}>
-                    Could not load balance.
-                  </Text>
+                  "—"
                 )}
+              </Text>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  fetchBalance(vaultState.vault.ergoAddress).then(setBalance)
+                }
+              >
+                Refresh
+              </Button>
+            </HStack>
 
-                <Divider my={2} />
+            <Divider my={2} />
 
-                <Heading size="sm">Send ERG</Heading>
-                <Stack spacing={2}>
-                  <Input
-                    placeholder="Recipient Ergo address (9...)"
-                    value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                    fontFamily="mono"
-                    fontSize="sm"
-                  />
-                  <Input
-                    placeholder="Amount (ERG)"
-                    type="number"
-                    step="0.001"
-                    value={amountErg}
-                    onChange={(e) => setAmountErg(e.target.value)}
-                    fontSize="sm"
-                  />
-                  <Button
-                    colorScheme="blue"
-                    onClick={handleSendErg}
-                    isLoading={sending}
-                    loadingText="Building & signing…"
-                  >
-                    Build, sign & broadcast
-                  </Button>
-                  {lastTxResult && (
-                    <Code
-                      wordBreak="break-all"
-                      whiteSpace="pre-wrap"
-                      fontSize="xs"
-                      p={2}
-                    >
-                      {lastTxResult}
-                    </Code>
-                  )}
-                  <Text fontSize="xs" color="orange.400">
-                    Heads up: a Tier 3 raw-ECDSA proof is not a valid Ergo
-                    Schnorr proof, so the broadcast step is expected to be
-                    rejected by the network until a real signer is wired in.
-                    Use Nautilus below for a fully functional path.
-                  </Text>
-                </Stack>
-              </>
-            )}
+            <Heading size="sm">Send ERG</Heading>
+            <Stack spacing={2}>
+              <Input
+                placeholder="Recipient Ergo address (9...)"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                fontFamily="mono"
+                fontSize="sm"
+              />
+              <Input
+                placeholder="Amount (ERG)"
+                type="number"
+                step="0.001"
+                value={amountErg}
+                onChange={(e) => setAmountErg(e.target.value)}
+                fontSize="sm"
+              />
+              <Button
+                colorScheme="blue"
+                onClick={handleSendErg}
+                isLoading={sending}
+                loadingText="Authorizing & signing…"
+              >
+                Send ERG (passkey will prompt)
+              </Button>
+              {lastSubmit && (
+                <Code
+                  whiteSpace="pre-wrap"
+                  wordBreak="break-all"
+                  fontSize="xs"
+                  p={2}
+                  colorScheme={lastSubmit.ok ? "green" : "red"}
+                >
+                  {lastSubmit.text || (lastSubmit.ok ? "(empty 200)" : "")}
+                </Code>
+              )}
+            </Stack>
+
+            <HStack mt={2}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  setVaultState({ kind: "locked", vault: vaultState.vault, passkeyAvailable: true })
+                }
+              >
+                Re-lock
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                colorScheme="red"
+                onClick={handleForgetVault}
+              >
+                Forget vault
+              </Button>
+            </HStack>
           </Stack>
         )}
 
@@ -382,15 +611,14 @@ export const ErgoWallet: React.FC = () => {
           <Heading size="sm">Or connect Nautilus directly</Heading>
           <Text fontSize="sm" opacity={0.8}>
             If you already have an Ergo wallet, skip Dynamic and connect
-            Nautilus over EIP-12. A native Dynamic Custom Wallet Connector
-            for Nautilus is a follow-up task.
+            Nautilus over EIP-12.
           </Text>
           <NautilusButton />
         </Stack>
 
-        {user?.email && (
+        {(user as any)?.email && (
           <Text fontSize="xs" opacity={0.6}>
-            Logged in as <Code>{user.email}</Code>
+            Logged in as <Code>{(user as any).email}</Code>
           </Text>
         )}
       </VStack>

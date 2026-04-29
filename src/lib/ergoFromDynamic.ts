@@ -1,50 +1,29 @@
 /**
- * Ergo-from-Dynamic helpers.
+ * Ergo-from-Dynamic legacy helpers.
  *
- * Dynamic.xyz does not natively support Ergo (it is a Tier 3 chain).
- * Per Dynamic's Tier 3 docs (/overview/wallets-and-chains/tier-3-chains)
- * Ergo uses secp256k1, the same curve as Ethereum. We therefore use
- * Dynamic's EVM embedded wallet as the signing root and derive the Ergo
- * identity from it as follows:
+ * NOTE: The production sign-in flow no longer uses these helpers. We
+ * now generate a fresh Ergo keypair inside the browser, encrypt it
+ * with a hardware-backed passkey (WebAuthn PRF) plus a recovery
+ * passphrase, and mirror the encrypted blob into Dynamic user
+ * metadata. See `lib/ergoKeyVault.ts` for the active path.
  *
- *  1. Ask the embedded wallet to sign a deterministic, well-known message
- *     ("Derive Ergo address v1") via `primaryWallet.signMessage(...)`.
- *  2. Recover the uncompressed secp256k1 public key from that signature
- *     using viem's `recoverPublicKey` (eth_personal_sign / EIP-191 hashing).
- *  3. Compress the 65-byte uncompressed key down to 33 bytes (standard
- *     SEC1 compressed format: 0x02/0x03 prefix + X coordinate).
- *  4. Hand the 33-byte compressed pubkey to ergo-lib-wasm's
- *     `Address.from_public_key(...)` which produces a P2PK Ergo address.
+ * The functions below are kept for two reasons:
  *
- * The resulting Ergo address is deterministic for a given Dynamic embedded
- * wallet: signing the same message always produces the same compressed
- * public key, which always maps to the same Ergo P2PK address.
+ *   (1) They demonstrate the original Tier 3 derivation pattern from
+ *       Dynamic's docs — useful as a reference for developers who
+ *       want to understand the Tier 3 architecture.
+ *   (2) `deriveErgoAddress` is still useful as a diagnostic ("does
+ *       your Dynamic embedded wallet produce a deterministic
+ *       signMessage?"), and we keep it exported so existing consumers
+ *       don't break.
  *
- * ---
- *
- * Caveat about transaction signing:
- *
- * Ergo's P2PK proofs are Schnorr-style sigma protocol proofs, NOT raw
- * secp256k1 ECDSA signatures over the tx digest. A faithful Tier 3
- * implementation therefore cannot simply "ask the EVM wallet to ECDSA-sign
- * the sighash and slot the bytes in as the proof" — building a real Ergo
- * proof requires interactive Schnorr commitments, which the Dynamic EVM
- * wallet does not expose.
- *
- * The `signErgoTx` helper below follows the structure described in the
- * task spec (compute digest -> signRawMessage -> attach as proof) so the
- * code path is wired end-to-end, but it should be treated as a stub: the
- * resulting transaction will not validate on Ergo mainnet until either
- *
- *   (a) a proper Schnorr-capable signer is available (e.g. a server-side
- *       signer that holds the same secret derived from Dynamic, or a
- *       Dynamic Custom Wallet Connector that knows the Ergo proof format),
- *       or
- *   (b) the user signs the prepared unsigned tx with Nautilus instead
- *       (see `components/NautilusButton.tsx`).
- *
- * The address-derivation path (`deriveErgoAddress`) is fully functional —
- * users can receive ERG and tokens at the derived address right away.
+ * Caveat about `signErgoTx`: Ergo P2PK proofs are Schnorr-style sigma
+ * protocol proofs, NOT raw secp256k1 ECDSA signatures over the tx
+ * digest. The structure below follows Dynamic's Tier 3 spec
+ * (compute digest -> signRawMessage -> attach as proof), but the
+ * resulting transaction will not validate on Ergo mainnet. Use the
+ * `lib/ergoKeyVault.ts` + `lib/ergoSigning.ts` pipeline for real
+ * Schnorr proofs that the network accepts.
  */
 
 import { recoverPublicKey, hexToBytes, bytesToHex } from "viem";
