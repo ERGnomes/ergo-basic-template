@@ -62,6 +62,11 @@ A modular React template for building applications on the Ergo blockchain. This 
    npm run build
    ```
 
+6. Serve the production build locally:
+   ```
+   npm run serve
+   ```
+
 > The build is wired through [CRACO](https://craco.js.org/) (`craco.config.js`)
 > so we can enable webpack 5's `asyncWebAssembly` experiment for
 > `ergo-lib-wasm-browser` and inject Node-style polyfills for the Dynamic
@@ -143,6 +148,37 @@ Nautilus's EIP-12 surface. That is intentionally left as a follow-up.
 | `src/components/NautilusButton.tsx`   | Direct EIP-12 Nautilus connect button.                                  |
 | `craco.config.js`                     | WASM + Node polyfill webpack overrides for CRA.                         |
 | `.env.example`                        | `REACT_APP_DYNAMIC_ENV_ID` / `NEXT_PUBLIC_DYNAMIC_ENV_ID`.              |
+
+## 🚂 Deploying to Railway
+
+This repo ships with a `railway.json`, a `nixpacks.toml`, and a `Procfile`,
+so a fresh Railway service should detect everything automatically:
+
+1. Create a new Railway project → **Deploy from GitHub repo** → select
+   this repository (or your fork) and the branch you want to deploy.
+2. Add the following environment variable on the Railway service:
+   - `REACT_APP_DYNAMIC_ENV_ID` — your Dynamic environment ID.
+   > CRA inlines `REACT_APP_*` values **at build time**, so it must be
+   > set on the Railway service before the first build (or Redeploy
+   > after adding it).
+3. (Optional) leave `PORT` alone — Railway sets it for you and the
+   `npm run serve` script binds to it via `serve -s build -l tcp://0.0.0.0:$PORT`.
+4. Trigger a deploy. Nixpacks will run:
+   ```
+   npm install --legacy-peer-deps --no-audit --no-fund
+   npm run build              # CI=false NODE_OPTIONS=--max-old-space-size=4096
+   npm run serve              # serves ./build on $PORT
+   ```
+5. Once the service is up, copy its public URL (e.g.
+   `https://your-app.up.railway.app`) and add it to your Dynamic
+   project's allowed origins in the Dynamic dashboard
+   (**Developers → CORS / Domains**). Without this, the embedded
+   wallet's `signMessage` call will be blocked by Dynamic's origin
+   check and the email-login flow will silently fail.
+
+If the build OOMs on a small Railway plan, raise the heap further by
+overriding the build command on the service to
+`NODE_OPTIONS=--max-old-space-size=8192 npm run build`.
 
 ## 📂 Project Structure
 

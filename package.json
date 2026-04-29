@@ -24,15 +24,18 @@
     "react-icons": "^3.11.0",
     "react-router-dom": "^7.4.0",
     "react-scripts": "5.0.1",
+    "serve": "^14.2.6",
     "typescript": "^5.4.5",
     "viem": "^2.48.4",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
     "start": "craco start",
-    "build": "craco build",
+    "build": "CI=false NODE_OPTIONS=--max-old-space-size=4096 craco build",
     "test": "craco test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "serve": "serve -s build -l tcp://0.0.0.0:${PORT:-3000} --no-clipboard",
+    "start:prod": "npm run serve"
   },
   "eslintConfig": {
     "extends": "react-app"
