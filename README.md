@@ -43,18 +43,106 @@ A modular React template for building applications on the Ergo blockchain. This 
 
 2. Install dependencies:
    ```
-   npm install
+   npm install --legacy-peer-deps
    ```
 
-3. Start the development server:
+3. Configure Dynamic.xyz (optional, only required for the email login flow):
+   ```
+   cp .env.example .env
+   # then edit .env and set REACT_APP_DYNAMIC_ENV_ID to your Dynamic env id
+   ```
+
+4. Start the development server:
    ```
    npm start
    ```
 
-4. Build for production:
+5. Build for production:
    ```
    npm run build
    ```
+
+> The build is wired through [CRACO](https://craco.js.org/) (`craco.config.js`)
+> so we can enable webpack 5's `asyncWebAssembly` experiment for
+> `ergo-lib-wasm-browser` and inject Node-style polyfills for the Dynamic
+> SDK's transitive dependencies. If you eject from CRA you'll need to
+> port that configuration manually.
+
+## 🔐 Dynamic.xyz authentication (Tier 3 architecture)
+
+Ergo is a [Tier 3 chain on Dynamic](https://docs.dynamic.xyz/overview/wallets-and-chains/tier-3-chains)
+— there is no native Ergo connector. This template ships a Tier 3
+integration that lets users:
+
+**(A) Sign in with email** and get a Dynamic-derived Ergo wallet, or
+**(B) Connect an existing Nautilus wallet** over EIP-12.
+
+### Email → Ergo flow
+
+Because Ergo uses secp256k1 (the same curve as Ethereum), we use Dynamic's
+EVM embedded wallet as the signing root and derive an Ergo identity from
+it. The full flow lives in [`src/lib/ergoFromDynamic.ts`](src/lib/ergoFromDynamic.ts):
+
+1. The user signs in with email through `<DynamicWidget />`. Dynamic
+   provisions an embedded EVM wallet for the account.
+2. We call `primaryWallet.signMessage("Derive Ergo address v1")` to get
+   an EIP-191 personal-signed signature.
+3. `viem`'s `recoverPublicKey` recovers the **uncompressed** secp256k1
+   public key from the signature.
+4. We compress that key to its 33-byte SEC1 form (`0x02`/`0x03` prefix
+   + X coordinate).
+5. `ergo-lib-wasm-browser`'s `Address.from_public_key(...)` builds a
+   P2PK mainnet address. We render its base58 string in the UI.
+
+The address derivation is deterministic — signing the same message
+always produces the same compressed public key, which always maps to
+the same Ergo P2PK address. Users can receive ERG and tokens at the
+derived address immediately.
+
+### ⚠️ Caveat: signing transactions
+
+Ergo P2PK proofs are **Schnorr-style sigma protocol** proofs, not raw
+secp256k1 ECDSA signatures over the sighash. Dynamic's EVM embedded
+wallet only exposes ECDSA signing primitives (`signMessage`,
+`signRawMessage`), so a faithful Tier 3 implementation cannot simply
+"ECDSA-sign the digest and slot the bytes in as the proof".
+
+`signErgoTx` in `src/lib/ergoFromDynamic.ts` follows the structure
+described in the Dynamic Tier 3 docs (compute digest → `signRawMessage`
+→ attach as proof) so the UI flow is wired end-to-end, but the
+resulting transaction will **not** validate on Ergo mainnet. The
+broadcast step in the UI is therefore expected to be rejected by the
+network until one of the following is in place:
+
+- a server-side Schnorr signer that holds the same secret derived from
+  the Dynamic embedded wallet, or
+- a [Custom Wallet Connector](https://docs.dynamic.xyz/wallets/advanced-wallets/custom-wallets)
+  fork of `@dynamic-labs/wallet-connectors` that implements Ergo's
+  proof format directly (tracked as a follow-up).
+
+Until then, **broadcasting transactions should use Nautilus**.
+
+### Nautilus flow
+
+`src/components/NautilusButton.tsx` detects `window.ergoConnector.nautilus`,
+calls `connect()`, and uses the EIP-12 dApp protocol directly (so it
+sidesteps Dynamic entirely). This path is fully functional today.
+
+A Dynamic-native Nautilus connector would require forking
+`@dynamic-labs/wallet-connectors` and implementing a Custom Wallet
+Connector that bridges Dynamic's `WalletConnector` interface to
+Nautilus's EIP-12 surface. That is intentionally left as a follow-up.
+
+### Files added by the Dynamic integration
+
+| File                                  | Purpose                                                                 |
+|---------------------------------------|-------------------------------------------------------------------------|
+| `src/lib/DynamicProvider.tsx`         | Wraps the app in `DynamicContextProvider` with `EthereumWalletConnectors`. |
+| `src/lib/ergoFromDynamic.ts`          | `deriveErgoAddress` + `signErgoTx` (Tier 3 helpers).                    |
+| `src/components/ErgoWallet.tsx`       | UI for the email → Ergo flow (widget, balance, send form).              |
+| `src/components/NautilusButton.tsx`   | Direct EIP-12 Nautilus connect button.                                  |
+| `craco.config.js`                     | WASM + Node polyfill webpack overrides for CRA.                         |
+| `.env.example`                        | `REACT_APP_DYNAMIC_ENV_ID` / `NEXT_PUBLIC_DYNAMIC_ENV_ID`.              |
 
 ## 📂 Project Structure
 
