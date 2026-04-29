@@ -27,6 +27,8 @@ import {
 } from "@dynamic-labs/sdk-react-core";
 import { isEthereumWallet } from "@dynamic-labs/ethereum";
 import { isErgoWallet } from "../lib/NautilusConnector";
+import { RecoveryPhraseModal } from "./onboarding/RecoveryPhraseModal";
+import { AddressCard } from "./onboarding/AddressCard";
 import {
   ErgoSecretBytes,
   attachPasskey,
@@ -444,10 +446,7 @@ export const ErgoWallet: React.FC = () => {
               broadcast transactions directly through Nautilus.
             </Text>
             {nautilusAddress && (
-              <Text fontSize="sm">
-                <strong>Address:</strong>{" "}
-                <Code wordBreak="break-all">{nautilusAddress}</Code>
-              </Text>
+              <AddressCard address={nautilusAddress} badge="Nautilus · Mainnet" />
             )}
             {nautilusBalance && (
               <Text fontSize="sm">
@@ -509,45 +508,17 @@ export const ErgoWallet: React.FC = () => {
         )}
 
         {showRecoveryPhrase && (
-          <Alert
-            status="success"
-            variant="left-accent"
-            borderRadius="md"
-            flexDirection="column"
-            alignItems="flex-start"
-          >
-            <HStack>
-              <AlertIcon />
-              <AlertTitle>Save your recovery phrase NOW</AlertTitle>
-            </HStack>
-            <AlertDescription fontSize="sm" mt={2}>
-              This is the ONLY way to recover your Ergo wallet if you
-              lose access to your passkey on every device. Write it down
-              physically. We will not show it again.
-            </AlertDescription>
-            <Code
-              w="100%"
-              mt={3}
-              p={3}
-              fontSize="sm"
-              whiteSpace="pre-wrap"
-              wordBreak="break-word"
-            >
-              {showRecoveryPhrase}
-            </Code>
-            <Button mt={3} size="sm" onClick={() => setShowRecoveryPhrase(null)}>
-              I've saved it — dismiss
-            </Button>
-          </Alert>
+          <RecoveryPhraseModal
+            isOpen={true}
+            phrase={showRecoveryPhrase}
+            onConfirmed={() => setShowRecoveryPhrase(null)}
+          />
         )}
 
         {vaultState.kind === "locked" && (
           <Stack spacing={3}>
             <Heading size="sm">Vault</Heading>
-            <Text fontSize="sm">
-              <strong>Address:</strong>{" "}
-              <Code>{vaultState.vault.ergoAddress}</Code>
-            </Text>
+            <AddressCard address={vaultState.vault.ergoAddress} />
             <HStack spacing={3}>
               {vaultState.passkeyAvailable && (
                 <Button
@@ -596,10 +567,7 @@ export const ErgoWallet: React.FC = () => {
               <Heading size="sm">Ergo wallet</Heading>
               <Badge colorScheme="green">unlocked</Badge>
             </HStack>
-            <Text fontSize="sm">
-              <strong>Address:</strong>{" "}
-              <Code>{vaultState.vault.ergoAddress}</Code>
-            </Text>
+            <AddressCard address={vaultState.vault.ergoAddress} />
             <HStack justify="space-between">
               <Text fontSize="sm">
                 <strong>Balance:</strong>{" "}

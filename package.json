@@ -20,6 +20,7 @@
     "@types/react-dom": "^18.2.20",
     "ergo-lib-wasm-browser": "^0.28.0",
     "framer-motion": "^6.5.1",
+    "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-icons": "^3.11.0",
