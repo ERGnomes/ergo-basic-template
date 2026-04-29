@@ -159,13 +159,42 @@ unusually well-suited to this (no Paillier/OT machinery needed). Out
 of scope for this template, but tracked as a follow-up if you build a
 real product on top.
 
-### Nautilus flow (parallel path)
+### Nautilus inside the Dynamic widget
 
-`src/components/NautilusButton.tsx` detects `window.ergoConnector.nautilus`,
-calls `connect()`, and uses the EIP-12 dApp protocol directly so it
-sidesteps Dynamic entirely. A Dynamic-native Custom Wallet Connector
-for Nautilus would require forking `@dynamic-labs/wallet-connectors`
-and is left as a follow-up.
+We ship a custom Dynamic wallet connector (`src/lib/NautilusConnector.ts`)
+that registers Nautilus alongside Dynamic's built-in connectors. When
+the user has the Nautilus extension installed, the `<DynamicWidget />`
+shows it as a selectable wallet automatically; when they don't,
+`isInstalledOnBrowser()` returns false and Dynamic hides it from the
+list. There's no separate "Connect Nautilus" button to find — the
+sign-in widget is unified.
+
+When a user picks Nautilus inside the widget:
+
+- `primaryWallet.connector.key === "nautilusergo"` becomes true.
+- `ErgoWallet.tsx` skips the passkey-encrypted vault flow entirely
+  (Nautilus owns its own keys natively).
+- A small "Connected via Nautilus" panel renders showing the address
+  and balance, and signing/broadcasting goes through `window.ergo`
+  (EIP-12) directly.
+
+#### Implementation note: claiming `EVM` as supported chain
+
+Dynamic's `Chain` enum is hardcoded to a fixed list and does not
+include `ERGO`. Our connector therefore claims `["EVM"]` as
+`supportedChains` so the widget's chain filter accepts it (the user's
+Dynamic project already has EVM enabled). One side-effect:
+`isEthereumWallet(wallet)` will return `true` for our Nautilus wallet
+object because it just checks `wallet.chain === 'EVM'`. We work
+around this by discriminating on `connector.key`, not on chain — see
+the runtime check in `ErgoWallet.tsx`. Downstream Ethereum-specific
+code paths are never invoked because all of our consumers route
+through that key check.
+
+A standalone `<NautilusButton />` is still rendered for users who
+choose to skip Dynamic entirely (e.g. quick test of the EIP-12 path
+without going through email login). It uses the same `window.ergo`
+API.
 
 ## 🚂 Deploying to Railway
 

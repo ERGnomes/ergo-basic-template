@@ -1,6 +1,7 @@
 import React, { ReactNode } from "react";
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum";
+import { NautilusWalletConnectors } from "./NautilusConnector";
 
 const ENV_ID =
   process.env.REACT_APP_DYNAMIC_ENV_ID ||
@@ -60,7 +61,13 @@ export const DynamicProvider: React.FC<Props> = ({ children }) => {
     <DynamicContextProvider
       settings={{
         environmentId: ENV_ID || PLACEHOLDER_ENV_ID,
-        walletConnectors: [EthereumWalletConnectors],
+        walletConnectors: [
+          EthereumWalletConnectors,
+          // Surfaces Nautilus inside the DynamicWidget when the user
+          // has the extension installed; auto-hidden otherwise via
+          // `isInstalledOnBrowser()`. See `lib/NautilusConnector.ts`.
+          NautilusWalletConnectors,
+        ],
       }}
     >
       {!ENV_ID && <MissingEnvBanner />}

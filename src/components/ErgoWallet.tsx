@@ -26,6 +26,7 @@ import {
   useUserUpdateRequest,
 } from "@dynamic-labs/sdk-react-core";
 import { isEthereumWallet } from "@dynamic-labs/ethereum";
+import { NAUTILUS_KEY } from "../lib/NautilusConnector";
 import {
   ErgoSecretBytes,
   attachPasskey,
@@ -107,10 +108,54 @@ export const ErgoWallet: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [lastSubmit, setLastSubmit] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const isEvm = useMemo(
-    () => Boolean(primaryWallet && isEthereumWallet(primaryWallet)),
+  // Nautilus reuses Dynamic's connector machinery via our custom
+  // NautilusWalletConnector. We discriminate by `connector.key` rather
+  // than the chain (Nautilus claims `EVM` to satisfy Dynamic's chain
+  // filter — see lib/NautilusConnector.ts for why).
+  const isNautilusViaDynamic = useMemo(
+    () =>
+      Boolean(primaryWallet && (primaryWallet as any).connector?.key === NAUTILUS_KEY),
     [primaryWallet]
   );
+
+  const isEvm = useMemo(
+    () =>
+      Boolean(
+        primaryWallet &&
+          !isNautilusViaDynamic &&
+          isEthereumWallet(primaryWallet)
+      ),
+    [primaryWallet, isNautilusViaDynamic]
+  );
+
+  const [nautilusAddress, setNautilusAddress] = useState<string | null>(null);
+  const [nautilusBalance, setNautilusBalance] = useState<ErgoBalance | null>(null);
+
+  useEffect(() => {
+    if (!isNautilusViaDynamic) {
+      setNautilusAddress(null);
+      setNautilusBalance(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const addr = (window as any).ergo
+          ? await (window as any).ergo.get_change_address()
+          : null;
+        if (!cancelled && addr) {
+          setNautilusAddress(addr);
+          const b = await fetchBalance(addr);
+          if (!cancelled) setNautilusBalance(b);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isNautilusViaDynamic]);
 
   const refreshVaultState = useCallback(async () => {
     if (!user) {
@@ -380,14 +425,47 @@ export const ErgoWallet: React.FC = () => {
 
         <DynamicWidget />
 
-        {primaryWallet && !isEvm && (
+        {isNautilusViaDynamic && (
+          <Stack
+            borderWidth="1px"
+            borderRadius="md"
+            p={4}
+            spacing={2}
+            borderColor={colorMode === "light" ? "orange.200" : "orange.700"}
+            bg={colorMode === "light" ? "orange.50" : "rgba(221, 107, 32, 0.1)"}
+          >
+            <HStack>
+              <Heading size="sm">Connected via Nautilus</Heading>
+              <Badge colorScheme="orange">EIP-12</Badge>
+            </HStack>
+            <Text fontSize="sm">
+              Nautilus manages your Ergo keys natively, so the
+              passkey-encrypted vault path is bypassed. Sign and
+              broadcast transactions directly through Nautilus.
+            </Text>
+            {nautilusAddress && (
+              <Text fontSize="sm">
+                <strong>Address:</strong>{" "}
+                <Code wordBreak="break-all">{nautilusAddress}</Code>
+              </Text>
+            )}
+            {nautilusBalance && (
+              <Text fontSize="sm">
+                <strong>Balance:</strong>{" "}
+                {formatErg(nautilusBalance.nanoErgs)} ERG
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        {primaryWallet && !isEvm && !isNautilusViaDynamic && (
           <Alert status="warning" borderRadius="md">
             <AlertIcon />
             <AlertDescription fontSize="sm">
-              The connected primary wallet is not EVM-capable. Sign in
-              with email instead so Dynamic provisions an embedded EVM
-              wallet — that's what gates access to your encrypted Ergo
-              vault.
+              The connected primary wallet is neither an EVM embedded
+              wallet nor Nautilus. Sign in with email (for the
+              passkey-encrypted vault) or pick Nautilus (if installed)
+              from the widget above.
             </AlertDescription>
           </Alert>
         )}
@@ -610,16 +688,21 @@ export const ErgoWallet: React.FC = () => {
           </Stack>
         )}
 
-        <Divider />
-
-        <Stack spacing={2}>
-          <Heading size="sm">Or connect Nautilus directly</Heading>
-          <Text fontSize="sm" opacity={0.8}>
-            If you already have an Ergo wallet, skip Dynamic and connect
-            Nautilus over EIP-12.
-          </Text>
-          <NautilusButton />
-        </Stack>
+        {!isNautilusViaDynamic && !primaryWallet && (
+          <>
+            <Divider />
+            <Stack spacing={2}>
+              <Heading size="sm">Or connect Nautilus directly</Heading>
+              <Text fontSize="sm" opacity={0.8}>
+                Prefer to skip Dynamic entirely? You can also connect
+                Nautilus over EIP-12 directly. (Nautilus is also
+                surfaced inside the Dynamic widget above when the
+                extension is installed.)
+              </Text>
+              <NautilusButton />
+            </Stack>
+          </>
+        )}
 
         {(user as any)?.email && (
           <Text fontSize="xs" opacity={0.6}>
