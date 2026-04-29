@@ -26,6 +26,40 @@ module.exports = {
       });
 
       webpackConfig.resolve = webpackConfig.resolve || {};
+      // CRA's `oneOf` rule list has a catch-all "file-loader" entry at the
+      // end that swallows any extension webpack doesn't recognize as JS,
+      // emitting it as a static asset. That breaks `.cjs` modules — for
+      // example openapi-fetch's CJS build, which transitively powers the
+      // MetaMask analytics client that Dynamic pulls in. Patch the
+      // catch-all so `.cjs` is preserved as a JS module.
+      const oneOfRule = webpackConfig.module.rules.find((r) => r && r.oneOf);
+      if (oneOfRule) {
+        const fileLoader = oneOfRule.oneOf.find(
+          (r) =>
+            r &&
+            r.type === "asset/resource" &&
+            Array.isArray(r.exclude)
+        );
+        if (fileLoader) {
+          fileLoader.exclude = [...fileLoader.exclude, /\.cjs$/];
+        }
+      }
+
+      webpackConfig.resolve.extensions = [
+        ...(webpackConfig.resolve.extensions || []),
+        ".cjs",
+      ];
+      webpackConfig.resolve.alias = {
+        ...(webpackConfig.resolve.alias || {}),
+        // openapi-fetch ships an ESM "dist/index.js" as `main` and CJS at
+        // "dist/cjs/index.cjs" via `exports.require`. CRA's webpack
+        // resolves the ESM build by `main`, but @metamask/sdk-analytics
+        // is compiled with esbuild's `__toESM(require("openapi-fetch"))`
+        // shim that, after webpack interop, leaves `.default` unset.
+        // Force the CJS build, which exposes a real `.default` on the
+        // module.exports object.
+        "openapi-fetch$": require.resolve("openapi-fetch/dist/cjs/index.cjs"),
+      };
       webpackConfig.resolve.fallback = {
         ...(webpackConfig.resolve.fallback || {}),
         buffer: require.resolve("buffer/"),
