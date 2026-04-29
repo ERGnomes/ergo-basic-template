@@ -1,0 +1,12 @@
+--- a/tsconfig.base.json
++++ b/tsconfig.base.json
+@@ -32,6 +32,9 @@
+       "@dynamic-labs-connectors/intersend-evm": [
+         "packages/@dynamic-labs-connectors/intersend-evm/src/index.ts"
+       ],
++      "@dynamic-labs-connectors/nautilus-ergo": [
++        "packages/@dynamic-labs-connectors/nautilus-ergo/src/index.ts"
++      ],
+       "@dynamic-labs-connectors/safe-evm": [
+         "packages/@dynamic-labs-connectors/safe-evm/src/index.ts"
+       ],

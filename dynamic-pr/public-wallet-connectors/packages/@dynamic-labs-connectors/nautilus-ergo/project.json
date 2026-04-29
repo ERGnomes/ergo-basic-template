@@ -1,0 +1,19 @@
+{
+  "name": "@dynamic-labs-connectors/nautilus-ergo",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/@dynamic-labs-connectors/nautilus-ergo/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:swc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/packages/@dynamic-labs-connectors/nautilus-ergo",
+        "main": "packages/@dynamic-labs-connectors/nautilus-ergo/src/index.ts",
+        "tsConfig": "packages/@dynamic-labs-connectors/nautilus-ergo/tsconfig.lib.json",
+        "generateExportsField": true
+      }
+    }
+  }
+}
