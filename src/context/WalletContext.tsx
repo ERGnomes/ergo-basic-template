@@ -17,7 +17,7 @@ import {
 } from "../utils/ergoExplorer";
 import { findExistingVault } from "../lib/ergoKeyVault";
 import { VaultRecord } from "../lib/vaultStorage";
-import { NAUTILUS_KEY } from "../lib/NautilusConnector";
+import { isErgoWallet } from "../lib/NautilusConnector";
 
 /**
  * WalletContext is the unified surface the rest of the app reads from
@@ -108,8 +108,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     let cancelled = false;
     const resolveAddress = async () => {
       // 1) Nautilus picked through the Dynamic widget.
-      const connectorKey = (primaryWallet as any)?.connector?.key;
-      if (connectorKey === NAUTILUS_KEY) {
+      if (isErgoWallet(primaryWallet)) {
         try {
           const w = window as any;
           const addr =

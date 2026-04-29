@@ -26,7 +26,7 @@ import {
   useUserUpdateRequest,
 } from "@dynamic-labs/sdk-react-core";
 import { isEthereumWallet } from "@dynamic-labs/ethereum";
-import { NAUTILUS_KEY } from "../lib/NautilusConnector";
+import { isErgoWallet } from "../lib/NautilusConnector";
 import {
   ErgoSecretBytes,
   attachPasskey,
@@ -109,12 +109,12 @@ export const ErgoWallet: React.FC = () => {
   const [lastSubmit, setLastSubmit] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Nautilus reuses Dynamic's connector machinery via our custom
-  // NautilusWalletConnector. We discriminate by `connector.key` rather
-  // than the chain (Nautilus claims `EVM` to satisfy Dynamic's chain
-  // filter — see lib/NautilusConnector.ts for why).
+  // NautilusWalletConnector. See `lib/NautilusConnector.ts` —
+  // `isErgoWallet` is the canonical check; do NOT use the upstream
+  // `isEthereumWallet` helper for this discrimination because our
+  // Nautilus connector claims `EVM` to satisfy Dynamic's chain filter.
   const isNautilusViaDynamic = useMemo(
-    () =>
-      Boolean(primaryWallet && (primaryWallet as any).connector?.key === NAUTILUS_KEY),
+    () => isErgoWallet(primaryWallet),
     [primaryWallet]
   );
 

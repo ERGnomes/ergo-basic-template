@@ -48,6 +48,25 @@ import {
 
 export const NAUTILUS_KEY = "nautilusergo";
 
+/**
+ * Canonical way to check whether a Dynamic primary wallet object is
+ * actually our Ergo / Nautilus connector.
+ *
+ * DO NOT use `@dynamic-labs/ethereum`'s `isEthereumWallet(wallet)` for
+ * this check — it's a chain-level helper (`wallet.chain === 'EVM'`)
+ * and our connector claims `EVM` to satisfy Dynamic's chain filter
+ * (the Chain enum upstream is closed-source and lacks `ERGO`). The
+ * key-based check below is the discriminator that actually works.
+ */
+export const isErgoWallet = (
+  wallet: unknown
+): boolean =>
+  Boolean(
+    wallet &&
+      typeof wallet === "object" &&
+      (wallet as any).connector?.key === NAUTILUS_KEY
+  );
+
 // We rely on the global `Window.ergoConnector` / `Window.ergo` types
 // declared in `src/utils/ergo.ts`. We avoid re-declaring them here so
 // the two modules don't collide on declaration-merging modifiers.
