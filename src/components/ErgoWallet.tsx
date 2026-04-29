@@ -44,6 +44,7 @@ import {
 import { isPlatformAuthenticatorAvailable } from "../lib/passkey";
 import { sendErg } from "../lib/ergoSigning";
 import { NautilusButton } from "./NautilusButton";
+import { ErgoTestLab } from "./ErgoTestLab";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 const NANOERG_PER_ERG = 1_000_000_000;
@@ -582,6 +583,10 @@ export const ErgoWallet: React.FC = () => {
                 </Code>
               )}
             </Stack>
+
+            <Divider my={2} />
+
+            <ErgoTestLab vault={vaultState.vault} />
 
             <HStack mt={2}>
               <Button
