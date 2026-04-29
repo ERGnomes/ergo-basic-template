@@ -81,7 +81,10 @@ export const WalletDashboard: React.FC = () => {
           Ergo Wallet Explorer
         </Heading>
         <Text fontSize="xl" color={colorMode === 'light' ? 'ergnome.text.light' : 'ergnome.text.dark'} textAlign="center" maxW="600px">
-          Connect your Nautilus wallet to see your ERG balance and NFTs!
+          Sign in with Dynamic to see your ERG balance and NFTs. You can
+          log in by email (we'll provision a passkey-encrypted Ergo
+          wallet for you) or pick Nautilus from the Dynamic widget if
+          you have the extension installed.
         </Text>
         <Button 
           size="lg" 
@@ -96,7 +99,7 @@ export const WalletDashboard: React.FC = () => {
           py={6}
           fontSize="xl"
         >
-          Connect Wallet
+          Sign in with Dynamic
         </Button>
       </VStack>
     );

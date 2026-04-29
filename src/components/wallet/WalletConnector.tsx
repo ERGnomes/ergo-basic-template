@@ -29,10 +29,17 @@ export interface WalletData {
 }
 
 export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
-  const { walletData, connectToWallet, disconnectFromWallet, autoConnectEnabled, setAutoConnect } = useWallet();
+  const { walletData, connectToWallet, disconnectFromWallet, autoConnectEnabled, setAutoConnect, source } = useWallet();
   const { isOpen, onOpen, onClose } = useDisclosure();
   const { isConnected, ergBalance, tokens = [], walletStatus } = walletData;
   const { colorMode } = useColorMode();
+  const sourceLabel = source === 'dynamic-nautilus'
+    ? 'Nautilus (via Dynamic)'
+    : source === 'vault'
+    ? 'Email + passkey vault'
+    : source === 'nautilus-direct'
+    ? 'Nautilus (direct)'
+    : null;
   
   useImperativeHandle(ref, () => connectToWallet);
 
@@ -52,14 +59,14 @@ export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
       >
         <Flex align="center">
           <Icon as={FaWallet} mr={2} color={isConnected ? (colorMode === 'light' ? 'ergnome.greenAccent.light' : 'ergnome.green') : (colorMode === 'light' ? 'ergnome.redAccent.light' : 'ergnome.red')} />
-          <Text>{isConnected ? `${formatTokenAmount(ergBalance)} ERG` : 'Connect Wallet'}</Text>
+          <Text>{isConnected ? `${formatTokenAmount(ergBalance)} ERG` : 'Sign in'}</Text>
         </Flex>
       </MenuButton>
       <MenuList zIndex={2} minW="280px" width="280px" p={1}>
         {!isConnected ? (
           <>
             <MenuItem onClick={connectToWallet} icon={<Icon as={FaWallet} color={colorMode === 'light' ? 'ergnome.blueAccent.light' : 'ergnome.blue'} />}>
-              Connect to Wallet
+              Sign in with Dynamic
             </MenuItem>
             <MenuItem onClick={() => setAutoConnect(!autoConnectEnabled)}>
               <Flex align="center" justify="space-between" w="100%">
@@ -80,6 +87,14 @@ export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
                 <Text color={colorMode === 'light' ? 'ergnome.greenAccent.light' : 'ergnome.green'}>{walletStatus}</Text>
               </Flex>
             </MenuItem>
+            {sourceLabel && (
+              <MenuItem closeOnSelect={false} px={4}>
+                <Flex align="center" justify="space-between" w="100%">
+                  <Text fontWeight="bold">Source:</Text>
+                  <Text>{sourceLabel}</Text>
+                </Flex>
+              </MenuItem>
+            )}
             <MenuItem closeOnSelect={false} px={4}>
               <Flex align="center" justify="space-between" w="100%">
                 <Text fontWeight="bold">ERG Balance:</Text>
