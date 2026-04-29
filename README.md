@@ -196,6 +196,33 @@ choose to skip Dynamic entirely (e.g. quick test of the EIP-12 path
 without going through email login). It uses the same `window.ergo`
 API.
 
+#### Upstream PR: pushing Nautilus to the official Dynamic connector list
+
+Dynamic ships an MIT-licensed monorepo,
+[`dynamic-labs-oss/public-wallet-connectors`](https://github.com/dynamic-labs-oss/public-wallet-connectors),
+where any wallet team can contribute a connector. Once merged it gets
+published to npm as `@dynamic-labs-connectors/<name>` and Dynamic's
+project picker shows the wallet as a first-class option for any other
+Dynamic customer.
+
+We've prepared a drop-in package for that repo under
+[`dynamic-pr/`](./dynamic-pr/) in this repo. It mirrors the existing
+connector packages exactly (same `package.json` / `project.json` /
+`.swcrc` / tsconfigs / eslint / jest config / README shape), ships
+34 unit tests, and was verified end-to-end against a fresh clone of
+the upstream monorepo:
+
+```
+nx run @dynamic-labs-connectors/nautilus-ergo:lint   # 0 errors, 0 warnings
+nx run @dynamic-labs-connectors/nautilus-ergo:test   # 34 passed, 34 total
+nx run @dynamic-labs-connectors/nautilus-ergo:build  # SWC compile OK
+```
+
+See [`dynamic-pr/README.md`](./dynamic-pr/README.md) for the exact
+submission flow and the two follow-up upstream changes required for a
+fully native Ergo experience (adding `ERGO` to `Chain` and getting the
+icon registered in `@dynamic-labs/wallet-book`).
+
 ## 🚂 Deploying to Railway
 
 This repo ships with a `railway.json`, a `nixpacks.toml`, and a `Procfile`,
