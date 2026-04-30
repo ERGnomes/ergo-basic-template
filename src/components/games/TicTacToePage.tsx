@@ -63,6 +63,17 @@ import {
 } from "../../lib/ergoKeyVault";
 import TicTacToeBoard from "./TicTacToeBoard";
 import TicTacToePractice from "./TicTacToePractice";
+import {
+  PendingTx,
+  PendingKind,
+  STUCK_AFTER_MS,
+  addPendingTx,
+  getPendingTxs,
+  reconcilePending,
+  removePendingTx,
+  subscribePending,
+} from "../../lib/games/pendingTx";
+import { applyMove } from "../../lib/games/ticTacToeLogic";
 
 const NANO_PER_ERG = 1_000_000_000;
 const MIN_WAGER_ERG = 0.01;
@@ -91,8 +102,25 @@ export const TicTacToePage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeGame, setActiveGame] = useState<DiscoveredGame | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [wagerErg, setWagerErg] = useState<number>(DEFAULT_WAGER_ERG);
   const [myPubKey, setMyPubKey] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingTx[]>(() => getPendingTxs());
+
+  // Subscribe to pending-tx changes anywhere in the app (cross-tab,
+  // in-tab re-renders after add / remove).
+  useEffect(() => {
+    const unsub = subscribePending(() => setPending(getPendingTxs()));
+    return unsub;
+  }, []);
+
+  // Tick once a second so elapsed-time displays keep refreshing even
+  // if no other state changes.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
 
   const contractAddress = useMemo(() => getGameP2SAddress(), []);
 
@@ -128,6 +156,16 @@ export const TicTacToePage: React.FC = () => {
     try {
       const out = await fetchAllGames();
       setGames(out);
+      // Reconcile pending ops against the fresh chain snapshot so
+      // confirmed ops disappear automatically.
+      const unspentBoxIds = new Set(out.map((g) => g.box.boxId));
+      const unspentTriples = new Set(
+        out.map(
+          (g) =>
+            `${g.state.p1PubKeyHex}|${g.state.p2PubKeyHex}|${g.state.wagerNanoErg.toString()}`
+        )
+      );
+      reconcilePending({ unspentBoxIds, unspentTriples });
     } catch (err: any) {
       toast({
         title: "Couldn't fetch games",
@@ -142,136 +180,207 @@ export const TicTacToePage: React.FC = () => {
     }
   }, [toast]);
 
-  // Initial + polling fetch.
+  // Initial fetch + adaptive polling: every 5s when any pending op is
+  // outstanding, every 15s otherwise. This is a read-only Explorer
+  // endpoint, well within rate limits.
   useEffect(() => {
     setLoading(true);
     refreshGames();
-    const iv = setInterval(refreshGames, 15_000);
-    return () => clearInterval(iv);
   }, [refreshGames]);
 
-  // Keep the active game in sync as the chain advances.
+  useEffect(() => {
+    const period = pending.length > 0 ? 5_000 : 15_000;
+    const iv = setInterval(refreshGames, period);
+    return () => clearInterval(iv);
+  }, [refreshGames, pending.length]);
+
+  // Project pending ops on top of the polled chain state so the UI
+  // renders the user's optimistic view (their just-submitted move
+  // already shows as played, the just-created game appears in the
+  // lobby, etc.).
+  const projectedGames: DiscoveredGame[] = useMemo(() => {
+    // Map keyed by follow-triple so we can update in place.
+    const byTriple = new Map<string, DiscoveredGame>();
+    const tripleOf = (p1: string, p2: string, w: bigint) =>
+      `${p1}|${p2}|${w.toString()}`;
+
+    for (const g of games) {
+      byTriple.set(
+        tripleOf(g.state.p1PubKeyHex, g.state.p2PubKeyHex, g.state.wagerNanoErg),
+        g
+      );
+    }
+
+    for (const p of pending) {
+      if (!p.predicted || !p.follow) continue;
+      const wagerBig = BigInt(p.follow.wagerNanoErg);
+      const key = tripleOf(p.follow.p1PubKeyHex, p.follow.p2PubKeyHex, wagerBig);
+      const existing = byTriple.get(key);
+      // Compose an overlay DiscoveredGame: preserve the existing box
+      // metadata so "Pot" and Explorer links remain realistic, but
+      // overwrite the game state with the predicted next board/phase.
+      const overlay: DiscoveredGame = existing
+        ? {
+            box: existing.box,
+            state: {
+              board: p.predicted.board,
+              p1PubKeyHex: p.predicted.p1PubKeyHex,
+              p2PubKeyHex: p.predicted.p2PubKeyHex,
+              wagerNanoErg: wagerBig,
+            },
+            phase:
+              p.predictedPhase === "spent" ? existing.phase : p.predictedPhase,
+            isJoined:
+              p.predicted.p1PubKeyHex !== p.predicted.p2PubKeyHex,
+          }
+        : {
+            // The successor box doesn't exist yet (create case). Fake
+            // a placeholder box so the lobby can render it with a
+            // "pending" badge.
+            box: {
+              boxId: `pending:${p.id}`,
+              value: (
+                BigInt(p.predicted.wagerNanoErg) +
+                BigInt(3_000_000) // approx safeMin; purely cosmetic
+              ).toString(),
+            },
+            state: {
+              board: p.predicted.board,
+              p1PubKeyHex: p.predicted.p1PubKeyHex,
+              p2PubKeyHex: p.predicted.p2PubKeyHex,
+              wagerNanoErg: wagerBig,
+            },
+            phase: p.predictedPhase === "spent" ? "open" : p.predictedPhase,
+            isJoined:
+              p.predicted.p1PubKeyHex !== p.predicted.p2PubKeyHex,
+          };
+      byTriple.set(key, overlay);
+    }
+
+    return Array.from(byTriple.values());
+  }, [games, pending]);
+
+  const pendingBoxIdsBeingSpent = useMemo(
+    () => new Set(pending.map((p) => p.spentBoxId).filter(Boolean) as string[]),
+    [pending]
+  );
+
+  // Keep the active game in sync as the chain advances — follows by
+  // the (p1, p2, wager) triple so both real and optimistic projections
+  // keep the board rendered as expected.
   useEffect(() => {
     if (!activeGame) return;
-    const match = games.find((g) => g.box.boxId === activeGame.box.boxId);
-    if (match) {
-      if (match !== activeGame) setActiveGame(match);
-      return;
-    }
-    // Box was spent — the next box has a new id. Try to follow by
-    // matching the (p1, p2, wager) triple.
-    const followed = games.find(
+    const followed = projectedGames.find(
       (g) =>
         g.state.p1PubKeyHex === activeGame.state.p1PubKeyHex &&
         g.state.p2PubKeyHex === activeGame.state.p2PubKeyHex &&
         g.state.wagerNanoErg === activeGame.state.wagerNanoErg
     );
-    if (followed) setActiveGame(followed);
+    if (followed && followed !== activeGame) setActiveGame(followed);
     // else: the game has been fully resolved and no unspent box remains.
-    // We leave activeGame pointing at the last known state so the
-    // winner-claim / drained result is visible in the UI.
-  }, [games, activeGame]);
+    // Leave activeGame at its last known state so the claim result
+    // stays visible in the UI.
+  }, [projectedGames, activeGame]);
 
   // ------------------------------------------------------------------
-  // Signing helper: wraps unlock-if-vault + signAndSubmit.
+  // Signing helper: wraps unlock-if-vault + signAndSubmit, then adds
+  // a PendingTx record if the caller supplied `pendingTemplate`.
   // ------------------------------------------------------------------
-  const signAndSubmitTx = async (prepared: {
-    unsignedEip12: any;
-    inputBoxes: any[];
-  }): Promise<boolean> => {
-    if (signingKind === "nautilus") {
-      const res = await signAndSubmit({
-        kind: "nautilus",
-        unsignedEip12: prepared.unsignedEip12,
-      });
+  const signAndSubmitTx = async (
+    prepared: { unsignedEip12: any; inputBoxes: any[] },
+    pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> | null
+  ): Promise<boolean> => {
+    const doSubmit = async (): Promise<{ ok: boolean; txId?: string; text: string }> => {
+      if (signingKind === "nautilus") {
+        const res = await signAndSubmit({
+          kind: "nautilus",
+          unsignedEip12: prepared.unsignedEip12,
+        });
+        return { ok: res.ok, txId: res.txId, text: res.responseText };
+      }
+      if (signingKind === "vault") {
+        if (!user) return { ok: false, text: "Not logged in." };
+        const vault = findExistingVault(user as any);
+        if (!vault) {
+          return {
+            ok: false,
+            text:
+              "No vault on this device. Provision your vault on /dynamic before playing with email.",
+          };
+        }
+        let secret: ErgoSecretBytes | null = null;
+        try {
+          secret = await unlockWithPasskey(vault);
+          const res = await signAndSubmit({
+            kind: "vault",
+            unsignedEip12: prepared.unsignedEip12,
+            inputBoxes: prepared.inputBoxes,
+            secret,
+          });
+          return { ok: res.ok, txId: res.txId, text: res.responseText };
+        } finally {
+          secret?.wipe();
+        }
+      }
+      return { ok: false, text: "No wallet connected." };
+    };
+
+    try {
+      const res = await doSubmit();
       if (!res.ok) {
         toast({
           title: "Submit rejected",
-          description: res.responseText.slice(0, 220),
+          description: res.text.slice(0, 220),
           status: "error",
           duration: 8000,
           isClosable: true,
         });
         return false;
       }
+      if (pendingTemplate && res.txId) {
+        addPendingTx({
+          ...pendingTemplate,
+          id: res.txId,
+          submittedAt: Date.now(),
+        });
+      }
       toast({
-        title: "Submitted",
-        description: `Tx ${res.txId?.slice(0, 12) ?? ""}…`,
+        title: "Submitted to mempool",
+        description:
+          res.txId
+            ? `tx ${res.txId.slice(0, 10)}… — waiting for confirmation (1–3 min)`
+            : "Waiting for confirmation (1–3 min).",
         status: "success",
         duration: 5000,
         isClosable: true,
       });
       return true;
+    } catch (err: any) {
+      toast({
+        title: "Signing failed",
+        description: err?.message || String(err),
+        status: "error",
+        duration: 6000,
+        isClosable: true,
+      });
+      return false;
     }
-    if (signingKind === "vault") {
-      if (!user) {
-        toast({ title: "Not logged in", status: "warning" });
-        return false;
-      }
-      const vault = findExistingVault(user as any);
-      if (!vault) {
-        toast({
-          title: "No vault on this device",
-          description:
-            "Provision your vault on /dynamic before playing a game with the email path.",
-          status: "warning",
-          duration: 6000,
-          isClosable: true,
-        });
-        return false;
-      }
-      let secret: ErgoSecretBytes | null = null;
-      try {
-        secret = await unlockWithPasskey(vault);
-        const res = await signAndSubmit({
-          kind: "vault",
-          unsignedEip12: prepared.unsignedEip12,
-          inputBoxes: prepared.inputBoxes,
-          secret,
-        });
-        if (!res.ok) {
-          toast({
-            title: "Submit rejected",
-            description: res.responseText.slice(0, 220),
-            status: "error",
-            duration: 8000,
-            isClosable: true,
-          });
-          return false;
-        }
-        toast({
-          title: "Submitted",
-          description: `Tx ${res.txId?.slice(0, 12) ?? ""}…`,
-          status: "success",
-          duration: 5000,
-          isClosable: true,
-        });
-        return true;
-      } catch (err: any) {
-        toast({
-          title: "Signing failed",
-          description: err?.message || String(err),
-          status: "error",
-          duration: 6000,
-          isClosable: true,
-        });
-        return false;
-      } finally {
-        secret?.wipe();
-      }
-    }
-    toast({
-      title: "No wallet connected",
-      description: "Sign in with Dynamic (or connect Nautilus) first.",
-      status: "warning",
-      duration: 4000,
-    });
-    return false;
   };
 
   // ------------------------------------------------------------------
   // Action handlers.
   // ------------------------------------------------------------------
+
+  const withBusy = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
+    setBusy(true);
+    setBusyLabel(label);
+    try {
+      return await fn();
+    } finally {
+      setBusy(false);
+      setBusyLabel(null);
+    }
+  };
 
   const handleCreate = async () => {
     if (!ergoAddress || !myPubKey) return;
@@ -279,140 +388,210 @@ export const TicTacToePage: React.FC = () => {
       toast({ title: `Minimum wager is ${MIN_WAGER_ERG} ERG`, status: "warning" });
       return;
     }
-    setBusy(true);
-    try {
-      const wagerNanoErg = BigInt(Math.floor(wagerErg * NANO_PER_ERG));
-      const tx = await buildCreateGameTx({
-        creatorAddress: ergoAddress,
-        creatorPubKeyHex: myPubKey,
-        wagerNanoErg,
-      });
-      const ok = await signAndSubmitTx(tx);
-      if (ok) {
-        // Give the mempool a second and refresh.
-        setTimeout(refreshGames, 3000);
+    await withBusy("Building create-game transaction…", async () => {
+      try {
+        const wagerNanoErg = BigInt(Math.floor(wagerErg * NANO_PER_ERG));
+        const tx = await buildCreateGameTx({
+          creatorAddress: ergoAddress,
+          creatorPubKeyHex: myPubKey,
+          wagerNanoErg,
+        });
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "create",
+          spentBoxId: null,
+          predicted: {
+            board: [0, 0, 0, 0, 0, 0, 0, 0, 0] as any,
+            p1PubKeyHex: myPubKey,
+            p2PubKeyHex: myPubKey,
+            wagerNanoErg: wagerNanoErg.toString(),
+          },
+          predictedPhase: "open",
+          follow: {
+            p1PubKeyHex: myPubKey,
+            p2PubKeyHex: myPubKey,
+            wagerNanoErg: wagerNanoErg.toString(),
+          },
+          description: `Creating game with ${wagerErg} ERG wager`,
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) setTimeout(refreshGames, 3000);
+      } catch (err: any) {
+        toast({
+          title: "Couldn't build transaction",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 6000,
+          isClosable: true,
+        });
       }
-    } catch (err: any) {
-      toast({
-        title: "Couldn't build transaction",
-        description: err?.message || String(err),
-        status: "error",
-        duration: 6000,
-        isClosable: true,
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   const handleJoin = async (game: DiscoveredGame) => {
     if (!ergoAddress || !myPubKey) return;
-    setBusy(true);
-    try {
-      const tx = await buildJoinGameTx({
-        currentGameBox: game.box,
-        currentGameState: game.state,
-        joinerAddress: ergoAddress,
-        joinerPubKeyHex: myPubKey,
-      });
-      const ok = await signAndSubmitTx(tx);
-      if (ok) {
-        setActiveGame(game);
-        setTimeout(refreshGames, 3000);
+    await withBusy("Building join transaction…", async () => {
+      try {
+        const tx = await buildJoinGameTx({
+          currentGameBox: game.box,
+          currentGameState: game.state,
+          joinerAddress: ergoAddress,
+          joinerPubKeyHex: myPubKey,
+        });
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "join",
+          spentBoxId: game.box.boxId,
+          predicted: {
+            board: game.state.board,
+            p1PubKeyHex: game.state.p1PubKeyHex,
+            p2PubKeyHex: myPubKey,
+            wagerNanoErg: game.state.wagerNanoErg.toString(),
+          },
+          predictedPhase: "ongoing",
+          follow: {
+            p1PubKeyHex: game.state.p1PubKeyHex,
+            p2PubKeyHex: myPubKey,
+            wagerNanoErg: game.state.wagerNanoErg.toString(),
+          },
+          description: `Joining game for ${formatErg(game.state.wagerNanoErg)} ERG`,
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) {
+          setActiveGame({
+            ...game,
+            state: {
+              ...game.state,
+              p2PubKeyHex: myPubKey,
+            },
+            isJoined: true,
+            phase: "ongoing",
+          });
+          setTimeout(refreshGames, 3000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't join",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 6000,
+          isClosable: true,
+        });
       }
-    } catch (err: any) {
-      toast({
-        title: "Couldn't join",
-        description: err?.message || String(err),
-        status: "error",
-        duration: 6000,
-        isClosable: true,
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   const handleMove = async (cell: number) => {
     if (!activeGame || !ergoAddress || !myPubKey) return;
-    setBusy(true);
-    try {
-      const tx = await buildMoveTx({
-        currentGameBox: activeGame.box,
-        currentGameState: activeGame.state,
-        moverAddress: ergoAddress,
-        moverPubKeyHex: myPubKey,
-        cell,
-      });
-      const ok = await signAndSubmitTx(tx);
-      if (ok) setTimeout(refreshGames, 3000);
-    } catch (err: any) {
-      toast({
-        title: "Couldn't play move",
-        description: err?.message || String(err),
-        status: "error",
-        duration: 6000,
-        isClosable: true,
-      });
-    } finally {
-      setBusy(false);
-    }
+    await withBusy("Building move transaction…", async () => {
+      try {
+        const tx = await buildMoveTx({
+          currentGameBox: activeGame.box,
+          currentGameState: activeGame.state,
+          moverAddress: ergoAddress,
+          moverPubKeyHex: myPubKey,
+          cell,
+        });
+        const predictedBoard = applyMove(activeGame.state.board, cell);
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "move",
+          spentBoxId: activeGame.box.boxId,
+          predicted: {
+            board: predictedBoard,
+            p1PubKeyHex: activeGame.state.p1PubKeyHex,
+            p2PubKeyHex: activeGame.state.p2PubKeyHex,
+            wagerNanoErg: activeGame.state.wagerNanoErg.toString(),
+          },
+          predictedPhase: "ongoing",
+          follow: {
+            p1PubKeyHex: activeGame.state.p1PubKeyHex,
+            p2PubKeyHex: activeGame.state.p2PubKeyHex,
+            wagerNanoErg: activeGame.state.wagerNanoErg.toString(),
+          },
+          description: `Playing cell ${cell + 1}`,
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) setTimeout(refreshGames, 3000);
+      } catch (err: any) {
+        toast({
+          title: "Couldn't play move",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 6000,
+          isClosable: true,
+        });
+      }
+    });
   };
 
   const handleCancel = async () => {
     if (!activeGame || !ergoAddress || !myPubKey) return;
-    setBusy(true);
-    try {
-      const tx = await buildCancelGameTx({
-        currentGameBox: activeGame.box,
-        currentGameState: activeGame.state,
-        creatorAddress: ergoAddress,
-        creatorPubKeyHex: myPubKey,
-      });
-      const ok = await signAndSubmitTx(tx);
-      if (ok) {
-        setActiveGame(null);
-        setTimeout(refreshGames, 3000);
+    await withBusy("Building cancel transaction…", async () => {
+      try {
+        const tx = await buildCancelGameTx({
+          currentGameBox: activeGame.box,
+          currentGameState: activeGame.state,
+          creatorAddress: ergoAddress,
+          creatorPubKeyHex: myPubKey,
+        });
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "cancel",
+          spentBoxId: activeGame.box.boxId,
+          predicted: null,
+          predictedPhase: "spent",
+          follow: null,
+          description: `Cancelling game (refund ${formatErg(
+            BigInt(activeGame.box.value)
+          )} ERG)`,
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) {
+          setActiveGame(null);
+          setTimeout(refreshGames, 3000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't cancel",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 6000,
+          isClosable: true,
+        });
       }
-    } catch (err: any) {
-      toast({
-        title: "Couldn't cancel",
-        description: err?.message || String(err),
-        status: "error",
-        duration: 6000,
-        isClosable: true,
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   const handleClaimWin = async () => {
     if (!activeGame || !ergoAddress || !myPubKey) return;
-    setBusy(true);
-    try {
-      const tx = await buildClaimWinTx({
-        currentGameBox: activeGame.box,
-        currentGameState: activeGame.state,
-        winnerAddress: ergoAddress,
-        winnerPubKeyHex: myPubKey,
-      });
-      const ok = await signAndSubmitTx(tx);
-      if (ok) {
-        setTimeout(refreshGames, 3000);
-        setTimeout(() => setActiveGame(null), 5000);
+    await withBusy("Building claim transaction…", async () => {
+      try {
+        const tx = await buildClaimWinTx({
+          currentGameBox: activeGame.box,
+          currentGameState: activeGame.state,
+          winnerAddress: ergoAddress,
+          winnerPubKeyHex: myPubKey,
+        });
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "claim",
+          spentBoxId: activeGame.box.boxId,
+          predicted: null,
+          predictedPhase: "spent",
+          follow: null,
+          description: `Claiming ${formatErg(BigInt(activeGame.box.value))} ERG pot`,
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) {
+          setTimeout(refreshGames, 3000);
+          setTimeout(() => setActiveGame(null), 5000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't claim",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 6000,
+          isClosable: true,
+        });
       }
-    } catch (err: any) {
-      toast({
-        title: "Couldn't claim",
-        description: err?.message || String(err),
-        status: "error",
-        duration: 6000,
-        isClosable: true,
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
   // ------------------------------------------------------------------
@@ -481,11 +660,27 @@ export const TicTacToePage: React.FC = () => {
       <VStack align="stretch" spacing={5}>
         {pageHeader}
 
+        <PendingBanner
+          pending={pending}
+          busy={busy}
+          busyLabel={busyLabel}
+          onDismiss={(id) => removePendingTx(id)}
+          onRefresh={refreshGames}
+        />
+
         {activeGame ? (
           <ActiveGameView
             game={activeGame}
             myPubKey={myPubKey}
             busy={busy}
+            busyLabel={busyLabel}
+            pending={pending.filter(
+              (p) =>
+                p.follow &&
+                p.follow.p1PubKeyHex === activeGame.state.p1PubKeyHex &&
+                (p.follow.p2PubKeyHex === activeGame.state.p2PubKeyHex ||
+                  (p.kind === "cancel" || p.kind === "claim"))
+            )}
             onMove={handleMove}
             onCancel={handleCancel}
             onClaimWin={handleClaimWin}
@@ -501,7 +696,7 @@ export const TicTacToePage: React.FC = () => {
             />
             <Divider />
             <GameList
-              games={games}
+              games={projectedGames}
               loading={loading}
               refreshing={refreshing}
               myPubKey={myPubKey}
@@ -509,11 +704,116 @@ export const TicTacToePage: React.FC = () => {
               onJoin={handleJoin}
               onOpen={setActiveGame}
               busy={busy}
+              pendingBoxIdsBeingSpent={pendingBoxIdsBeingSpent}
             />
           </>
         )}
       </VStack>
     </Box>
+  );
+};
+
+// ====================================================================
+
+// ====================================================================
+
+interface PendingBannerProps {
+  pending: PendingTx[];
+  busy: boolean;
+  busyLabel: string | null;
+  onDismiss: (id: string) => void;
+  onRefresh: () => void;
+}
+
+const formatElapsed = (ms: number): string => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  return `${m}m ${rs}s`;
+};
+
+const EXPLORER_TX_URL = "https://explorer.ergoplatform.com/en/transactions/";
+
+const PendingBanner: React.FC<PendingBannerProps> = ({
+  pending,
+  busy,
+  busyLabel,
+  onDismiss,
+  onRefresh,
+}) => {
+  // Nothing to show.
+  if (pending.length === 0 && !busy) return null;
+
+  return (
+    <Stack spacing={2}>
+      {busy && (
+        <Alert status="info" borderRadius="md">
+          <Spinner size="sm" mr={3} />
+          <AlertDescription fontSize="sm">
+            {busyLabel || "Working…"} Your wallet may prompt you to sign.
+          </AlertDescription>
+        </Alert>
+      )}
+      {pending.map((p) => {
+        const elapsed = Date.now() - p.submittedAt;
+        const stuck = elapsed > STUCK_AFTER_MS;
+        return (
+          <Alert
+            key={p.id}
+            status={stuck ? "warning" : "info"}
+            borderRadius="md"
+            variant="left-accent"
+          >
+            <AlertIcon />
+            <Stack spacing={1} flex="1">
+              <HStack justify="space-between">
+                <Text fontWeight="semibold" fontSize="sm">
+                  {p.description}
+                </Text>
+                <HStack spacing={2}>
+                  <Badge colorScheme={stuck ? "yellow" : "blue"}>
+                    {formatElapsed(elapsed)}
+                  </Badge>
+                  <Button
+                    as="a"
+                    size="xs"
+                    variant="outline"
+                    href={`${EXPLORER_TX_URL}${p.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Explorer
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => onDismiss(p.id)}
+                  >
+                    Dismiss
+                  </Button>
+                </HStack>
+              </HStack>
+              <Text fontSize="xs" opacity={0.8}>
+                {stuck
+                  ? "This tx has been in the mempool for a while. Either the network is congested, or it was evicted — click Explorer to check. Your optimistic move will keep showing until the chain catches up; dismiss once you've confirmed the outcome."
+                  : "Submitted to the Ergo mempool. Each block is 1–3 minutes; the board will reflect this once it confirms. The lobby polls every 5 seconds while a tx is pending."}
+              </Text>
+              <Text fontSize="xs" opacity={0.55}>
+                txId: <Code fontSize="xs">{p.id.slice(0, 16)}…</Code>
+              </Text>
+            </Stack>
+          </Alert>
+        );
+      })}
+      {pending.length > 0 && (
+        <HStack justify="flex-end">
+          <Button size="xs" variant="ghost" onClick={onRefresh}>
+            Check again now
+          </Button>
+        </HStack>
+      )}
+    </Stack>
   );
 };
 
@@ -596,6 +896,7 @@ interface GameListProps {
   onJoin: (g: DiscoveredGame) => void;
   onOpen: (g: DiscoveredGame) => void;
   busy: boolean;
+  pendingBoxIdsBeingSpent: Set<string>;
 }
 
 const GameList: React.FC<GameListProps> = ({
@@ -607,6 +908,7 @@ const GameList: React.FC<GameListProps> = ({
   onJoin,
   onOpen,
   busy,
+  pendingBoxIdsBeingSpent,
 }) => {
   if (loading) {
     return (
@@ -659,26 +961,39 @@ const GameList: React.FC<GameListProps> = ({
                 const iAmP2 =
                   myPubKey !== null && myPubKey === g.state.p2PubKeyHex;
                 const iAmParticipant = iAmP1 || iAmP2;
+                const isOptimistic = g.box.boxId.startsWith("pending:");
+                const hasInflightSpend = pendingBoxIdsBeingSpent.has(
+                  g.box.boxId
+                );
                 const canJoin =
-                  g.phase === "open" && !iAmP1 && !!myPubKey;
+                  g.phase === "open" &&
+                  !iAmP1 &&
+                  !!myPubKey &&
+                  !isOptimistic &&
+                  !hasInflightSpend;
                 return (
                   <Tr key={g.box.boxId}>
                     <Td>
-                      <Badge
-                        colorScheme={
-                          g.phase === "open"
-                            ? "blue"
-                            : g.phase === "ongoing"
-                            ? "purple"
-                            : g.phase === "won"
-                            ? "green"
-                            : "gray"
-                        }
-                      >
-                        {g.phase === "ongoing"
-                          ? `turn: ${st.kind === "ongoing" ? st.turn : "?"}`
-                          : g.phase}
-                      </Badge>
+                      <HStack spacing={1}>
+                        <Badge
+                          colorScheme={
+                            g.phase === "open"
+                              ? "blue"
+                              : g.phase === "ongoing"
+                              ? "purple"
+                              : g.phase === "won"
+                              ? "green"
+                              : "gray"
+                          }
+                        >
+                          {g.phase === "ongoing"
+                            ? `turn: ${st.kind === "ongoing" ? st.turn : "?"}`
+                            : g.phase}
+                        </Badge>
+                        {(isOptimistic || hasInflightSpend) && (
+                          <Badge colorScheme="yellow">pending</Badge>
+                        )}
+                      </HStack>
                     </Td>
                     <Td fontSize="xs">{formatErg(g.state.wagerNanoErg)}</Td>
                     <Td fontSize="xs">{formatErg(BigInt(g.box.value))}</Td>
@@ -741,6 +1056,8 @@ interface ActiveViewProps {
   game: DiscoveredGame;
   myPubKey: string | null;
   busy: boolean;
+  busyLabel: string | null;
+  pending: PendingTx[];
   onMove: (cell: number) => void;
   onCancel: () => void;
   onClaimWin: () => void;
@@ -751,6 +1068,8 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   game,
   myPubKey,
   busy,
+  busyLabel,
+  pending,
   onMove,
   onCancel,
   onClaimWin,
@@ -762,6 +1081,8 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   const iAmP2 = myPubKey !== null && myPubKey === game.state.p2PubKeyHex;
   const mySymbol = iAmP1 ? "X" : iAmP2 ? "O" : null;
   const addrs = getPlayerAddresses(game.state);
+
+  const hasPendingForThisGame = pending.length > 0;
 
   let disabledReason: string | null = null;
   if (status.kind === "open") {
@@ -775,7 +1096,10 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   } else if (status.turn !== mySymbol) {
     disabledReason = `Waiting for ${status.turn}'s move`;
   } else if (busy) {
-    disabledReason = "Submitting…";
+    disabledReason = busyLabel || "Submitting…";
+  } else if (hasPendingForThisGame) {
+    disabledReason =
+      "Waiting for the previous transaction to confirm (1–3 min)";
   }
 
   const canClaimWin =
