@@ -136,20 +136,18 @@ export const reconcilePending = (snap: ChainSnapshot): void => {
       // Resolved when the spent box is gone (no successor expected).
       if (spentDisappeared) continue;
       surviving.push(p);
+    } else if (p.kind === "create") {
+      // First box for this game: no spent input. Confirmed once the
+      // (p1, p1, wager) open game appears on-chain.
+      if (followBoxIsThere) continue;
+      surviving.push(p);
     } else {
-      // create / join / move: resolved when both:
-      //   - the predicted (p1, p2, wager)-triple box is unspent
-      //   - the spent box (if any) is no longer unspent
-      const created =
-        p.kind === "create" ? followBoxIsThere : true;
-      const consumed =
-        p.spentBoxId === null ? true : spentDisappeared;
-      if (followBoxIsThere && (created || consumed)) {
-        // Successor box visible; whether the old box has been removed
-        // from the polled set yet or not, optimistic prediction is
-        // confirmed.
-        continue;
-      }
+      // join / move: the follow triple may already match the *pre-tx*
+      // unspent box (same p1, p2, wager across a move). We must wait
+      // until the spent input box id drops out of the unspent set;
+      // otherwise we'd clear the pending op ~10s after submit while
+      // the old box is still the only mempool-visible state.
+      if (followBoxIsThere && spentDisappeared) continue;
       surviving.push(p);
     }
   }
