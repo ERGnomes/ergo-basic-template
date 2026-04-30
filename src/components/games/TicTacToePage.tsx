@@ -56,13 +56,23 @@ import {
 } from "../../lib/games/ticTacToeTx";
 import { signAndSubmit } from "../../lib/games/signAndSubmit";
 import { pubKeyHexFromAddress } from "../../lib/games/pubkey";
-import { isErgoWallet } from "../../lib/NautilusConnector";
 import {
   findExistingVault,
   unlockWithPasskey,
   ErgoSecretBytes,
 } from "../../lib/ergoKeyVault";
 import TicTacToeBoard from "./TicTacToeBoard";
+import TicTacToePractice from "./TicTacToePractice";
+
+// WebAuthn PRF is required by the email-vault path. Firefox stable
+// doesn't ship it yet (April 2026). We detect Firefox synchronously
+// via the UA so we can show a banner without waiting on a WebAuthn
+// round-trip that would just fail later.
+const isFirefox = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /firefox\//i.test(ua) && !/seamonkey\//i.test(ua);
+};
 
 const NANO_PER_ERG = 1_000_000_000;
 const MIN_WAGER_ERG = 0.01;
@@ -419,16 +429,73 @@ export const TicTacToePage: React.FC = () => {
   // Render.
   // ------------------------------------------------------------------
 
+  const firefox = isFirefox();
+
+  // Always-on shell: header + practice board + warnings. The on-chain
+  // lobby only layers on top once the user is connected.
+  const pageHeader = (
+    <>
+      <Stack spacing={1}>
+        <Heading size="lg">Ergo Tic-Tac-Toe</Heading>
+        <Text fontSize="sm" opacity={0.8}>
+          On-chain multiplayer game. Every move is a real Ergo
+          transaction. You need TWO different wallets to play a real
+          game — the contract won't let you join your own open game.
+        </Text>
+        <Text fontSize="xs" opacity={0.6}>
+          Contract: <Code fontSize="xs">{truncAddr(contractAddress)}</Code>
+        </Text>
+      </Stack>
+
+      <Alert status="warning" borderRadius="md">
+        <AlertIcon />
+        <Stack spacing={1}>
+          <AlertTitle>Unaudited smart contract</AlertTitle>
+          <AlertDescription fontSize="sm">
+            Enforces strict two-player turns, winner-takes-all, and
+            creator-cancel, but has NO abandonment timeout — if your
+            opponent stops playing, your wager is stuck until they
+            sign again. Test with tiny wagers first.
+          </AlertDescription>
+        </Stack>
+      </Alert>
+
+      {firefox && (
+        <Alert status="warning" borderRadius="md">
+          <AlertIcon />
+          <Stack spacing={1}>
+            <AlertTitle>Firefox can't use the email-vault path</AlertTitle>
+            <AlertDescription fontSize="sm">
+              Our passkey vault needs the WebAuthn PRF extension, which
+              Firefox stable doesn't ship yet. You can still play an
+              on-chain game in Firefox if you connect Nautilus (the
+              extension → Sign in with Dynamic → Nautilus). To use the
+              email-login path, open this page in Chrome, Edge, or
+              Safari 18+. Practice mode below works in any browser.
+            </AlertDescription>
+          </Stack>
+        </Alert>
+      )}
+
+      <TicTacToePractice />
+    </>
+  );
+
   if (!ergoAddress) {
     return (
-      <Box maxW="780px" mx="auto" mt={8} p={6}>
-        <Alert status="info" borderRadius="md">
-          <AlertIcon />
-          <AlertDescription>
-            Sign in with Dynamic (or connect Nautilus) from the dashboard
-            before playing a tic-tac-toe game.
-          </AlertDescription>
-        </Alert>
+      <Box maxW="900px" mx="auto" mt={6} p={6}>
+        <VStack align="stretch" spacing={5}>
+          {pageHeader}
+          <Alert status="info" borderRadius="md">
+            <AlertIcon />
+            <AlertDescription fontSize="sm">
+              Sign in from the <Code>Dashboard</Code> or{" "}
+              <Code>Dynamic Login</Code> page (with email or Nautilus)
+              to create and join real on-chain games. Practice mode
+              above works without any wallet.
+            </AlertDescription>
+          </Alert>
+        </VStack>
       </Box>
     );
   }
@@ -436,31 +503,7 @@ export const TicTacToePage: React.FC = () => {
   return (
     <Box maxW="900px" mx="auto" mt={6} p={6}>
       <VStack align="stretch" spacing={5}>
-        <Stack spacing={1}>
-          <Heading size="lg">Ergo Tic-Tac-Toe</Heading>
-          <Text fontSize="sm" opacity={0.8}>
-            Every move is a real on-chain transaction. Games are
-            discovered by scanning unspent boxes at the contract
-            address.
-          </Text>
-          <Text fontSize="xs" opacity={0.6}>
-            Contract: <Code fontSize="xs">{truncAddr(contractAddress)}</Code>
-          </Text>
-        </Stack>
-
-        <Alert status="warning" borderRadius="md">
-          <AlertIcon />
-          <Stack spacing={1}>
-            <AlertTitle>Unaudited smart contract</AlertTitle>
-            <AlertDescription fontSize="sm">
-              This contract has not been professionally audited. It
-              enforces strict two-player turns, winner-takes-all, and
-              creator-cancel, but it has NO abandonment timeout — if
-              your opponent stops playing, your wager is stuck until
-              they sign again. Test with tiny wagers first.
-            </AlertDescription>
-          </Stack>
-        </Alert>
+        {pageHeader}
 
         {activeGame ? (
           <ActiveGameView
@@ -527,6 +570,11 @@ const CreateGameForm: React.FC<CreateFormProps> = ({
           You'll lock your wager into the game contract. A matching
           wager from the joiner is required. Winner takes the whole pot;
           if it ends in a draw both players must co-sign to split.
+        </Text>
+        <Text fontSize="xs" opacity={0.6}>
+          The contract blocks you from joining your own game — to
+          actually play, share the lobby URL with someone else (or
+          use a second wallet on another device / browser).
         </Text>
         <HStack>
           <Text fontSize="sm" minW="100px">
@@ -600,9 +648,20 @@ const GameList: React.FC<GameListProps> = ({
         </Button>
       </HStack>
       {games.length === 0 ? (
-        <Text fontSize="sm" opacity={0.7}>
-          No games yet. Be the first to create one!
-        </Text>
+        <Stack spacing={2}>
+          <Text fontSize="sm" opacity={0.7}>
+            No games on-chain yet. Create one with the form above — your
+            wager will be locked in the contract until someone else
+            joins.
+          </Text>
+          <Text fontSize="xs" opacity={0.55}>
+            To play against yourself for testing, use Practice mode at
+            the top of the page. The contract requires two different
+            wallets for real games, so you'd need Nautilus in one
+            browser and Dynamic email-login in another (or two Dynamic
+            accounts).
+          </Text>
+        </Stack>
       ) : (
         <Box overflowX="auto">
           <Table size="sm" variant="simple">
