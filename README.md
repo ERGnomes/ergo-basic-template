@@ -182,6 +182,15 @@ When a user picks Nautilus inside the widget:
   and balance, and signing/broadcasting goes through `window.ergo`
   (EIP-12) directly.
 
+### Funding the passkey vault from Nautilus
+
+If you use **both** paths (email vault for Ergo signing **and** Nautilus
+inside Dynamic), the Dynamic Login page (`/dynamic`) includes **Fund
+passkey vault from Nautilus**: it builds a simple send transaction from
+your Nautilus change address to your vault Ergo address and asks
+Nautilus to sign via EIP-12 (`src/components/FundVaultFromNautilus.tsx`,
+`buildSendErgUnsigned` in `src/lib/ergoSigning.ts`).
+
 #### Implementation note: claiming `EVM` as supported chain
 
 Dynamic's `Chain` enum is hardcoded to a fixed list and does not

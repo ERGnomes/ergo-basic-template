@@ -50,6 +50,7 @@ import { NautilusButton } from "./NautilusButton";
 import { ErgoTestLab } from "./ErgoTestLab";
 import { ErgoTxActivityPanel } from "./wallet/ErgoTxActivityPanel";
 import { recordErgoTxActivity } from "../lib/ergoTxActivity";
+import { FundVaultFromNautilus } from "./FundVaultFromNautilus";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 const NANOERG_PER_ERG = 1_000_000_000;
@@ -414,6 +415,11 @@ export const ErgoWallet: React.FC = () => {
     toast({ title: "Vault forgotten", status: "info", duration: 3000 });
   };
 
+  const vaultErgoAddress =
+    vault && (vaultState.kind === "locked" || vaultState.kind === "unlocked")
+      ? vault.ergoAddress
+      : null;
+
   return (
     <Box
       maxW="780px"
@@ -435,6 +441,11 @@ export const ErgoWallet: React.FC = () => {
         </Text>
 
         <DynamicWidget />
+
+        <FundVaultFromNautilus
+          dynamicUserPresent={Boolean(user)}
+          vaultAddress={vaultErgoAddress}
+        />
 
         {isNautilusViaDynamic && (
           <Stack
