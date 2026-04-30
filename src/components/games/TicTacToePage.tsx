@@ -12,6 +12,13 @@ import {
   Flex,
   HStack,
   Heading,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   NumberDecrementStepper,
   NumberIncrementStepper,
   NumberInput,
@@ -28,12 +35,14 @@ import {
   Tr,
   VStack,
   useColorMode,
+  useClipboard,
   useToast,
 } from "@chakra-ui/react";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { useWallet } from "../../context/WalletContext";
 import {
   statusOf,
+  type Board,
 } from "../../lib/games/ticTacToeLogic";
 import {
   getGameP2SAddress,
@@ -72,6 +81,10 @@ import {
 } from "../../lib/games/pendingTx";
 import { applyMove } from "../../lib/games/ticTacToeLogic";
 import { recordErgoTxActivity } from "../../lib/ergoTxActivity";
+import {
+  gameRecordFromHistory,
+  stringifyGameRecord,
+} from "../../lib/games/ticTacToeGameRecord";
 
 const NANO_PER_ERG = 1_000_000_000;
 const MIN_WAGER_ERG = 0.01;
@@ -96,6 +109,9 @@ export const TicTacToePage: React.FC = () => {
 
   const [games, setGames] = useState<DiscoveredGame[]>([]);
   const [gameHistory, setGameHistory] = useState<GameHistorySnapshot[]>([]);
+  const [historyInspect, setHistoryInspect] = useState<GameHistorySnapshot | null>(
+    null
+  );
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeGame, setActiveGame] = useState<DiscoveredGame | null>(null);
@@ -703,7 +719,15 @@ export const TicTacToePage: React.FC = () => {
               onCreate={handleCreate}
             />
             <Divider />
-            <GameHistoryRail history={gameHistory} />
+            <GameHistoryRail
+              history={gameHistory}
+              onInspect={setHistoryInspect}
+            />
+            <FinishedGameModal
+              game={historyInspect}
+              onClose={() => setHistoryInspect(null)}
+              contractAddress={contractAddress}
+            />
             <Divider />
             <GameList
               games={projectedGames}
@@ -729,9 +753,13 @@ const EXPLORER_TX_URL = "https://explorer.ergoplatform.com/en/transactions/";
 
 interface GameHistoryRailProps {
   history: GameHistorySnapshot[];
+  onInspect: (row: GameHistorySnapshot) => void;
 }
 
-const GameHistoryRail: React.FC<GameHistoryRailProps> = ({ history }) => {
+const GameHistoryRail: React.FC<GameHistoryRailProps> = ({
+  history,
+  onInspect,
+}) => {
   const { colorMode } = useColorMode();
   const border = colorMode === "light" ? "gray.200" : "whiteAlpha.300";
 
@@ -749,7 +777,10 @@ const GameHistoryRail: React.FC<GameHistoryRailProps> = ({ history }) => {
         <Text fontSize="xs" opacity={0.75}>
           On-chain boxes at this contract that were later spent (cancel,
           claim, etc.). Mid-move spends are hidden so this reads as a
-          simple activity log — not every intermediate board state.
+          simple activity log — not every intermediate board state. Use{" "}
+          <strong>View board</strong> for the final snapshot;{" "}
+          <strong>Copy standard record</strong> exports versioned JSON (
+          <Code fontSize="xs">schemaVersion: 1</Code>) for tools or archives.
         </Text>
         {history.length === 0 ? (
           <Text fontSize="sm" opacity={0.6}>
@@ -767,6 +798,7 @@ const GameHistoryRail: React.FC<GameHistoryRailProps> = ({ history }) => {
                   <Th>Wager</Th>
                   <Th>Pot (last box)</Th>
                   <Th>Closing tx</Th>
+                  <Th></Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -800,6 +832,11 @@ const GameHistoryRail: React.FC<GameHistoryRailProps> = ({ history }) => {
                         {h.spentTransactionId.slice(0, 10)}…
                       </Button>
                     </Td>
+                    <Td>
+                      <Button size="xs" onClick={() => onInspect(h)}>
+                        View board
+                      </Button>
+                    </Td>
                   </Tr>
                 ))}
               </Tbody>
@@ -808,6 +845,137 @@ const GameHistoryRail: React.FC<GameHistoryRailProps> = ({ history }) => {
         )}
       </Stack>
     </Box>
+  );
+};
+
+interface FinishedGameModalProps {
+  game: GameHistorySnapshot | null;
+  onClose: () => void;
+  contractAddress: string;
+}
+
+const FinishedGameModal: React.FC<FinishedGameModalProps> = ({
+  game,
+  onClose,
+  contractAddress,
+}) => {
+  const toast = useToast();
+  const recordJson = game
+    ? stringifyGameRecord(gameRecordFromHistory(game, contractAddress))
+    : "";
+  const { onCopy, hasCopied } = useClipboard(recordJson);
+
+  if (!game) return null;
+
+  const addrs = getPlayerAddresses(game.state);
+  const st = statusOf(game.state.board, !game.isJoined);
+  const label =
+    game.phase === "open"
+      ? "Cancelled (never joined)"
+      : game.phase === "won"
+      ? "Won (claimed)"
+      : game.phase === "drawn"
+      ? "Draw (archived)"
+      : "Ongoing (final snapshot)";
+
+  return (
+    <Modal isOpen onClose={onClose} size="lg">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Finished game</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <Stack spacing={4}>
+            <HStack>
+              <Badge
+                colorScheme={
+                  game.phase === "won"
+                    ? "green"
+                    : game.phase === "drawn"
+                    ? "gray"
+                    : "orange"
+                }
+              >
+                {label}
+              </Badge>
+              <Text fontSize="xs" opacity={0.7}>
+                Block {game.settlementHeight}
+              </Text>
+            </HStack>
+            <Text fontSize="sm" opacity={0.85}>
+              This is the <strong>last on-chain box</strong> before the closing
+              transaction — not every intermediate move. For a full replay you
+              would index each spend in the chain (future work).
+            </Text>
+            <Flex justify="center">
+              <TicTacToeBoard
+                board={game.state.board as Board}
+                readOnly
+                highlightMovable={false}
+              />
+            </Flex>
+            <Stack spacing={1} fontSize="sm">
+              <Text>
+                <strong>Wager (each):</strong> {formatErg(game.state.wagerNanoErg)} ERG
+              </Text>
+              <Text>
+                <strong>Pot (this box):</strong> {formatErg(BigInt(game.box.value))} ERG
+              </Text>
+              <Text>
+                <strong>X (creator):</strong>{" "}
+                <Code fontSize="xs">{truncAddr(addrs.p1)}</Code>
+              </Text>
+              <Text>
+                <strong>O:</strong>{" "}
+                {addrs.p2 ? (
+                  <Code fontSize="xs">{truncAddr(addrs.p2)}</Code>
+                ) : (
+                  <Text as="span" opacity={0.6}>
+                    —
+                  </Text>
+                )}
+              </Text>
+              {st.kind === "ongoing" && (
+                <Text fontSize="xs" opacity={0.75}>
+                  Turn at this snapshot: <strong>{st.turn}</strong>
+                </Text>
+              )}
+              <Text fontSize="xs" wordBreak="break-all">
+                <strong>Box:</strong> <Code fontSize="xs">{game.box.boxId}</Code>
+              </Text>
+              <Text fontSize="xs" wordBreak="break-all">
+                <strong>Contract:</strong>{" "}
+                <Code fontSize="xs">{truncAddr(contractAddress)}</Code>
+              </Text>
+              <Button
+                as="a"
+                size="xs"
+                variant="link"
+                href={`${EXPLORER_TX_URL}${game.spentTransactionId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                alignSelf="flex-start"
+              >
+                Closing transaction on Explorer
+              </Button>
+            </Stack>
+          </Stack>
+        </ModalBody>
+        <ModalFooter gap={2}>
+          <Button
+            onClick={() => {
+              onCopy();
+              toast({ title: "Copied game record (JSON)", status: "success", duration: 2000 });
+            }}
+          >
+            {hasCopied ? "Copied" : "Copy standard record (JSON)"}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   );
 };
 
