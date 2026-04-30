@@ -74,6 +74,7 @@ import {
   subscribePending,
 } from "../../lib/games/pendingTx";
 import { applyMove } from "../../lib/games/ticTacToeLogic";
+import { recordErgoTxActivity } from "../../lib/ergoTxActivity";
 
 const NANO_PER_ERG = 1_000_000_000;
 const MIN_WAGER_ERG = 0.01;
@@ -338,10 +339,16 @@ export const TicTacToePage: React.FC = () => {
         return false;
       }
       if (pendingTemplate && res.txId) {
+        const submittedAt = Date.now();
         addPendingTx({
           ...pendingTemplate,
           id: res.txId,
-          submittedAt: Date.now(),
+          submittedAt,
+        });
+        recordErgoTxActivity({
+          txId: res.txId,
+          label: `Tic-tac-toe · ${pendingTemplate.description}`,
+          submittedAt,
         });
       }
       toast({

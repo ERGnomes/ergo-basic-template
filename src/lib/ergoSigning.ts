@@ -9,6 +9,7 @@
  */
 
 import { ErgoSecretBytes } from "./ergoKeyVault";
+import { parseTxIdFromSubmitResponse } from "./ergoSubmitTxId";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 const NODE_BASE = "https://api.ergoplatform.com/api/v1";
@@ -154,10 +155,13 @@ export const sendErg = async (params: {
     body: JSON.stringify(signedJson),
   });
   const submitText = await submitRes.text();
+  const resolvedTxId = submitRes.ok
+    ? parseTxIdFromSubmitResponse(submitText, txId)
+    : undefined;
 
   return {
-    txId,
-    submittedTxId: submitRes.ok ? txId : undefined,
+    txId: resolvedTxId ?? txId,
+    submittedTxId: submitRes.ok ? resolvedTxId ?? txId : undefined,
     submitResponse: submitText,
     submitOk: submitRes.ok,
   };
