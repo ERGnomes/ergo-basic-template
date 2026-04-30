@@ -16,10 +16,12 @@ import {
   TabPanels,
   Tabs,
   HStack,
-  Badge
+  Badge,
+  useToast,
 } from "@chakra-ui/react";
 import { FaWallet } from 'react-icons/fa';
 import { useWallet } from '../../context/WalletContext';
+import { walletProviderMode } from '../../lib/appEnv';
 import { TokenCard, TokenData } from '../common/TokenCard';
 import { TokenModal } from '../common/TokenModal';
 import { processTokens, filterNFTs, filterFungibleTokens, groupByCollection } from '../../utils/tokenProcessing';
@@ -28,7 +30,8 @@ import { HowToGetErg } from '../onboarding/HowToGetErg';
 import { AddressCard } from '../onboarding/AddressCard';
 
 export const WalletDashboard: React.FC = () => {
-  const { walletData, connectToWallet, ergoAddress, source } = useWallet();
+  const toast = useToast();
+  const { walletData, connectPrimaryWallet, ergoAddress, source } = useWallet();
   const { isConnected, ergBalance, tokens: rawTokens, walletStatus } = walletData;
   const hasZeroBalance = isConnected && Number(ergBalance) === 0 && rawTokens.length === 0;
   const sourceLabel =
@@ -100,14 +103,28 @@ export const WalletDashboard: React.FC = () => {
             textAlign="center"
             maxW="650px"
           >
-            One sign-in gets you a self-custodial Ergo wallet, an NFT gallery,
-            and on-chain Send-ERG. No browser extension required (but
-            Nautilus works too if you already have it).
+            {walletProviderMode === "nautilus"
+              ? "Connect with the Nautilus browser extension to view balances, NFTs, and use Ergo features in this template."
+              : walletProviderMode === "dynamic"
+              ? "Sign in with Dynamic.xyz for email + passkey vault Ergo signing, or pick Nautilus inside the Dynamic widget if you have it installed."
+              : "Sign in with Dynamic.xyz (email + passkey vault, or Nautilus inside the widget), or connect Nautilus directly from the header menu."}
           </Text>
           <Button
             size="lg"
             leftIcon={<Icon as={FaWallet} />}
-            onClick={connectToWallet}
+            onClick={async () => {
+              try {
+                await connectPrimaryWallet();
+              } catch (e: any) {
+                toast({
+                  title: "Connection failed",
+                  description: e?.message || String(e),
+                  status: "error",
+                  duration: 7000,
+                  isClosable: true,
+                });
+              }
+            }}
             bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
             color="white"
             _hover={{
@@ -117,8 +134,18 @@ export const WalletDashboard: React.FC = () => {
             py={6}
             fontSize="xl"
           >
-            Sign in with Dynamic
+            {walletProviderMode === "nautilus"
+              ? "Connect with Nautilus"
+              : walletProviderMode === "dynamic"
+              ? "Sign in with Dynamic"
+              : "Get started"}
           </Button>
+          {walletProviderMode === "both" && (
+            <Text fontSize="sm" opacity={0.75} textAlign="center">
+              Tip: use the <strong>header wallet menu</strong> to choose Dynamic or
+              Nautilus.
+            </Text>
+          )}
         </VStack>
 
         <HowItWorks />

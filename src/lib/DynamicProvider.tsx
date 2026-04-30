@@ -2,11 +2,9 @@ import React, { ReactNode } from "react";
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum";
 import { NautilusWalletConnectors } from "./NautilusConnector";
+import { dynamicAuthRoutesEnabled, dynamicEnvironmentId } from "./appEnv";
 
-const ENV_ID =
-  process.env.REACT_APP_DYNAMIC_ENV_ID ||
-  process.env.NEXT_PUBLIC_DYNAMIC_ENV_ID ||
-  "";
+const ENV_ID = dynamicEnvironmentId;
 
 interface Props {
   children: ReactNode;
@@ -51,8 +49,8 @@ const MissingEnvBanner: React.FC = () => (
     <strong>Dynamic.xyz environment ID is missing.</strong> Set{" "}
     <code>REACT_APP_DYNAMIC_ENV_ID</code> (or{" "}
     <code>NEXT_PUBLIC_DYNAMIC_ENV_ID</code>) on the build environment
-    and redeploy. See <code>.env.example</code>. The Dynamic-based
-    pages will not work until this is configured.
+    and redeploy. See <code>SETUP.md</code> and <code>.env.example</code>.
+    The Dynamic-based pages will not work until this is configured.
   </div>
 );
 
@@ -70,7 +68,7 @@ export const DynamicProvider: React.FC<Props> = ({ children }) => {
         ],
       }}
     >
-      {!ENV_ID && <MissingEnvBanner />}
+      {dynamicAuthRoutesEnabled && !ENV_ID && <MissingEnvBanner />}
       {children}
     </DynamicContextProvider>
   );
