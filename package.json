@@ -1,6 +1,6 @@
 {
   "name": "ergo-basic-template",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "node": ">=20.19.0"
@@ -42,6 +42,12 @@
     "eject": "react-scripts eject",
     "serve": "serve -s build -l tcp://0.0.0.0:${PORT:-3000} --no-clipboard",
     "start:prod": "npm run serve"
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^react-router-dom$": "<rootDir>/node_modules/react-router-dom/dist/index.js",
+      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js"
+    }
   },
   "eslintConfig": {
     "extends": "react-app"
