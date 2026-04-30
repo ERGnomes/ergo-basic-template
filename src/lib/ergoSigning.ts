@@ -67,20 +67,21 @@ export interface BuildAndSignResult {
   submitOk: boolean;
 }
 
+export interface SendErgUnsigned {
+  unsignedEip12: any;
+  inputBoxes: any[];
+}
+
 /**
- * Build, sign, and submit a simple "send X ERG to recipient" tx.
- *
- * This is the happy-path utility used by ErgoWallet.tsx. For more
- * sophisticated use cases (multi-output, tokens, custom registers),
- * import the lower-level helpers from `@fleet-sdk/core` directly.
+ * Build a simple P2PK send (ERG only) as an EIP-12 unsigned transaction.
+ * Sign with either `sendErg` (vault secret) or Nautilus `sign_tx` + `submit_tx`.
  */
-export const sendErg = async (params: {
+export const buildSendErgUnsigned = async (params: {
   fromAddress: string;
   toAddress: string;
   amountNanoErg: bigint;
-  secret: ErgoSecretBytes;
-}): Promise<BuildAndSignResult> => {
-  const { fromAddress, toAddress, amountNanoErg, secret } = params;
+}): Promise<SendErgUnsigned> => {
+  const { fromAddress, toAddress, amountNanoErg } = params;
 
   const utxoRes = await fetch(
     `${ERGO_API}/boxes/unspent/byAddress/${encodeURIComponent(fromAddress)}?limit=50`
@@ -104,7 +105,6 @@ export const sendErg = async (params: {
     throw new Error("Block-headers response was empty.");
   }
   const currentHeight: number = explorerHeaders[0].height;
-  const headersArr = explorerHeaders.map(adaptExplorerHeaderForSigmaRust);
 
   const fleet = await import("@fleet-sdk/core");
   const { TransactionBuilder, OutputBuilder, RECOMMENDED_MIN_FEE_VALUE } =
@@ -119,6 +119,42 @@ export const sendErg = async (params: {
     .payFee(fee)
     .build()
     .toEIP12Object();
+
+  return { unsignedEip12: builderTx, inputBoxes: inputs };
+};
+
+/**
+ * Build, sign, and submit a simple "send X ERG to recipient" tx.
+ *
+ * This is the happy-path utility used by ErgoWallet.tsx. For more
+ * sophisticated use cases (multi-output, tokens, custom registers),
+ * import the lower-level helpers from `@fleet-sdk/core` directly.
+ */
+export const sendErg = async (params: {
+  fromAddress: string;
+  toAddress: string;
+  amountNanoErg: bigint;
+  secret: ErgoSecretBytes;
+}): Promise<BuildAndSignResult> => {
+  const { fromAddress, toAddress, amountNanoErg, secret } = params;
+
+  const { unsignedEip12: builderTx, inputBoxes: inputs } =
+    await buildSendErgUnsigned({
+      fromAddress,
+      toAddress,
+      amountNanoErg,
+    });
+
+  const headersRes = await fetch(`${NODE_BASE}/blocks/headers?limit=10`);
+  if (!headersRes.ok) {
+    throw new Error(`Could not fetch block headers: HTTP ${headersRes.status}`);
+  }
+  const headersJson = await headersRes.json();
+  const explorerHeaders = (headersJson.items || headersJson) as any[];
+  if (!Array.isArray(explorerHeaders) || explorerHeaders.length === 0) {
+    throw new Error("Block-headers response was empty.");
+  }
+  const headersArr = explorerHeaders.map(adaptExplorerHeaderForSigmaRust);
 
   const wasm = await loadWasm();
   const unsignedTx = wasm.UnsignedTransaction.from_json(JSON.stringify(builderTx));
