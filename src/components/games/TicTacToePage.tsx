@@ -1083,6 +1083,8 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   const addrs = getPlayerAddresses(game.state);
 
   const hasPendingForThisGame = pending.length > 0;
+  const primaryPending =
+    pending.find((p) => p.kind === "move") ?? pending[0] ?? null;
 
   let disabledReason: string | null = null;
   if (status.kind === "open") {
@@ -1130,9 +1132,31 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
                 : "purple"
             }
           >
-            {status.kind === "ongoing" ? `turn: ${status.turn}` : status.kind}
+            {status.kind === "ongoing"
+              ? hasPendingForThisGame
+                ? `turn: ${status.turn} · tx confirming`
+                : `turn: ${status.turn}`
+              : status.kind}
           </Badge>
         </HStack>
+
+        {hasPendingForThisGame && primaryPending && (
+          <Alert status="info" borderRadius="md" variant="subtle" py={2}>
+            <AlertIcon />
+            <Box>
+              <AlertTitle fontSize="sm">
+                Last action — waiting for block confirmation
+              </AlertTitle>
+              <AlertDescription fontSize="xs">
+                <strong>{primaryPending.description}</strong> is in the mempool.
+                The board shows your optimistic result; the official turn and
+                cell unlock update once Ergo includes the transaction (often
+                1–3 minutes). Use the blue banner above for Explorer and elapsed
+                time.
+              </AlertDescription>
+            </Box>
+          </Alert>
+        )}
 
         <Stack spacing={0.5} fontSize="sm">
           <Text>
