@@ -186,12 +186,13 @@ When a user picks Nautilus inside the widget:
 
 ### Funding the passkey vault from Nautilus
 
-If you use **both** paths (email vault for Ergo signing **and** Nautilus
-inside Dynamic), the Dynamic Login page (`/dynamic`) includes **Fund
-passkey vault from Nautilus**: it builds a simple send transaction from
-your Nautilus change address to your vault Ergo address and asks
-Nautilus to sign via EIP-12 (`src/components/FundVaultFromNautilus.tsx`,
-`buildSendErgUnsigned` in `src/lib/ergoSigning.ts`).
+On the Dynamic Login page (`/dynamic`), **Fund passkey vault from Nautilus**
+uses the **classic EIP-12 path** (`ergoConnector.nautilus.connect()` →
+`window.ergo`), **not** the Dynamic widget’s wallet list. Connect with the
+button in that panel, then send ERG and/or attach a token (e.g. NFT by
+`tokenId` + amount `1`) to your vault address. Implementation:
+`src/components/FundVaultFromNautilus.tsx`, `buildSendErgUnsigned` in
+`src/lib/ergoSigning.ts`.
 
 #### Implementation note: claiming `EVM` as supported chain
 
