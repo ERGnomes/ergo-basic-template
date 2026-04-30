@@ -142,13 +142,17 @@ key in any form.
 
 ### Browser support for the passkey path
 
-WebAuthn PRF is the only piece with non-universal support:
+WebAuthn PRF support has improved across the board:
 
 - ✅ Chrome / Edge (desktop & Android)
 - ✅ Safari 18+ (macOS Sonoma+, iOS 18+)
-- ⚠️ Firefox: PRF support is partial; users on stable Firefox will see
-  a "passkey vault unavailable" banner and should use the Nautilus
-  path instead.
+- ✅ Firefox (modern stable versions ship PRF; this has worked
+  end-to-end in our own testing)
+
+If a specific browser + authenticator combination ever can't do PRF,
+the vault flow surfaces a clear "WebAuthn PRF extension not
+supported" error at the moment of the first passkey call rather
+than pre-emptively blocking you.
 
 ### Future hardening: 2-of-2 MPC
 

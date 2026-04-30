@@ -10,6 +10,7 @@ import { WalletProvider } from './context/WalletContext';
 import RosenBridgeTest from './components/RosenBridgeTest';
 import { DynamicProvider } from './lib/DynamicProvider';
 import { ErgoWallet } from './components/ErgoWallet';
+import { TicTacToePage } from './components/games/TicTacToePage';
 
 export const App = () => {
   // Ref to trigger wallet connect from components that need it
@@ -26,6 +27,7 @@ export const App = () => {
               navLinks={[
                 { label: 'Dashboard', to: '/' },
                 { label: 'Dynamic Login', to: '/dynamic' },
+                { label: 'Tic-Tac-Toe', to: '/games/tic-tac-toe' },
                 { label: 'NFT Gallery', to: '/nft-gallery' },
                 { label: 'Metadata Test', to: '/rosen-test' }
               ]}
@@ -33,6 +35,7 @@ export const App = () => {
               <Routes>
                 <Route path="/" element={<WalletDashboard />} />
                 <Route path="/dynamic" element={<ErgoWallet />} />
+                <Route path="/games/tic-tac-toe" element={<TicTacToePage />} />
                 <Route path="/nft-gallery" element={<NFTGalleryPage />} />
                 <Route path="/rosen-test" element={<RosenBridgeTest />} />
               </Routes>
