@@ -48,6 +48,8 @@ import { isPlatformAuthenticatorAvailable } from "../lib/passkey";
 import { sendErg } from "../lib/ergoSigning";
 import { NautilusButton } from "./NautilusButton";
 import { ErgoTestLab } from "./ErgoTestLab";
+import { ErgoTxActivityPanel } from "./wallet/ErgoTxActivityPanel";
+import { recordErgoTxActivity } from "../lib/ergoTxActivity";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 const NANOERG_PER_ERG = 1_000_000_000;
@@ -367,6 +369,13 @@ export const ErgoWallet: React.FC = () => {
         duration: 6000,
         isClosable: true,
       });
+      if (result.submitOk && result.submittedTxId) {
+        recordErgoTxActivity({
+          txId: result.submittedTxId,
+          label: `Send ERG (${amountErg} ERG)`,
+          submittedAt: Date.now(),
+        });
+      }
       if (result.submitOk) {
         setRecipient("");
         setAmountErg("");
@@ -654,6 +663,20 @@ export const ErgoWallet: React.FC = () => {
               </Button>
             </HStack>
           </Stack>
+        )}
+
+        {(vaultState.kind === "unlocked" ||
+          (isNautilusViaDynamic && nautilusAddress)) && (
+          <>
+            <Divider />
+            <ErgoTxActivityPanel
+              ergoAddress={
+                vaultState.kind === "unlocked"
+                  ? vaultState.vault.ergoAddress
+                  : nautilusAddress!
+              }
+            />
+          </>
         )}
 
         {!isNautilusViaDynamic && !primaryWallet && (

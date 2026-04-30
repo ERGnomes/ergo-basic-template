@@ -18,6 +18,7 @@
  */
 
 import { ErgoSecretBytes } from "../ergoKeyVault";
+import { parseTxIdFromSubmitResponse } from "../ergoSubmitTxId";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 
@@ -119,7 +120,10 @@ const signAndSubmitNautilus = async (unsigned: any): Promise<SubmitResult> => {
     body: JSON.stringify(signed),
   });
   const text = await res.text();
-  return { ok: res.ok, responseText: text, txId: res.ok ? text.trim() : undefined };
+  const txId = res.ok
+    ? parseTxIdFromSubmitResponse(text, undefined)
+    : undefined;
+  return { ok: res.ok, responseText: text, txId };
 };
 
 const signAndSubmitVault = async (
@@ -172,6 +176,7 @@ const signAndSubmitVault = async (
     boxes,
     dataBoxes
   );
+  const canonicalTxId = signed.id().to_str();
   const signedJson = JSON.parse(signed.to_json());
 
   const submitRes = await fetch(`${ERGO_API}/mempool/transactions/submit`, {
@@ -180,9 +185,12 @@ const signAndSubmitVault = async (
     body: JSON.stringify(signedJson),
   });
   const text = await submitRes.text();
+  const txId = submitRes.ok
+    ? parseTxIdFromSubmitResponse(text, canonicalTxId)
+    : undefined;
   return {
     ok: submitRes.ok,
     responseText: text,
-    txId: submitRes.ok ? signed.id().to_str() : undefined,
+    txId,
   };
 };
