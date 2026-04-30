@@ -10,7 +10,8 @@
 providers = ["node"]
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-9_x"]
+# Node 20.18.x trips EBADENGINE on several Dynamic / viem deps (>=20.19).
+nixPkgs = ["nodejs_22", "npm-9_x"]
 
 [phases.install]
 cmds = ["npm install --legacy-peer-deps --no-audit --no-fund"]

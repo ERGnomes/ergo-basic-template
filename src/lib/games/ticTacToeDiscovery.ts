@@ -24,6 +24,41 @@ export interface DiscoveredGame {
   isJoined: boolean;
 }
 
+/** Latest known on-chain snapshot for a spent game box (Explorer `byErgoTree`). */
+export interface GameHistorySnapshot {
+  box: ExplorerBoxLike;
+  state: GameState;
+  phase: DiscoveredGame["phase"];
+  isJoined: boolean;
+  settlementHeight: number;
+  spentTransactionId: string;
+}
+
+const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredGame | null => {
+  let state: GameState | null = null;
+  try {
+    state = parseGameBox(box);
+  } catch {
+    return null;
+  }
+  if (!state) return null;
+  const isJoined = state.p1PubKeyHex !== state.p2PubKeyHex;
+  let phase: DiscoveredGame["phase"];
+  if (!isJoined) {
+    phase = "open";
+  } else {
+    const w = winnerOf(state.board);
+    if (w !== CELL_EMPTY && w !== null) {
+      phase = "won";
+    } else if (nonEmptyCount(state.board) === 9) {
+      phase = "drawn";
+    } else {
+      phase = "ongoing";
+    }
+  }
+  return { box, state, phase, isJoined };
+};
+
 /**
  * Fetch every unspent box at the tic-tac-toe contract and decode it
  * into a `DiscoveredGame`. Boxes with malformed / missing registers
@@ -41,28 +76,8 @@ export const fetchAllGames = async (): Promise<DiscoveredGame[]> => {
   const items: ExplorerBoxLike[] = body.items || [];
   const games: DiscoveredGame[] = [];
   for (const box of items) {
-    let state: GameState | null = null;
-    try {
-      state = parseGameBox(box);
-    } catch {
-      continue;
-    }
-    if (!state) continue;
-    const isJoined = state.p1PubKeyHex !== state.p2PubKeyHex;
-    let phase: DiscoveredGame["phase"];
-    if (!isJoined) {
-      phase = "open";
-    } else {
-      const w = winnerOf(state.board);
-      if (w !== CELL_EMPTY && w !== null) {
-        phase = "won";
-      } else if (nonEmptyCount(state.board) === 9) {
-        phase = "drawn";
-      } else {
-        phase = "ongoing";
-      }
-    }
-    games.push({ box, state, phase, isJoined });
+    const g = boxToDiscovered(box);
+    if (g) games.push(g);
   }
   return games;
 };
@@ -70,6 +85,48 @@ export const fetchAllGames = async (): Promise<DiscoveredGame[]> => {
 export const fetchOpenGames = async (): Promise<DiscoveredGame[]> => {
   const all = await fetchAllGames();
   return all.filter((g) => g.phase === "open");
+};
+
+/**
+ * Recent boxes that ever used this contract ErgoTree, including **spent**
+ * outputs (claim / cancel / replaced by next move). Sorted newest-first
+ * by settlement height when the API supports `sortDirection=desc`.
+ *
+ * Use this for a "game history" rail: finished games no longer appear in
+ * the unspent lobby but their last on-chain snapshot is still visible here.
+ */
+export const fetchRecentGameHistory = async (
+  limit = 30
+): Promise<GameHistorySnapshot[]> => {
+  const treeHex = getGameErgoTreeHex();
+  const url = `${EXPLORER_API}/boxes/byErgoTree/${treeHex}?limit=${limit}&offset=0&sortDirection=desc`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Explorer HTTP ${res.status}`);
+  }
+  const body = await res.json();
+  const items: ExplorerBoxLike[] = body.items || [];
+  const out: GameHistorySnapshot[] = [];
+  for (const box of items) {
+    const g = boxToDiscovered(box);
+    if (!g) continue;
+    const spent = box.spentTransactionId;
+    if (!spent || typeof spent !== "string") continue;
+    const h = box.settlementHeight;
+    if (typeof h !== "number") continue;
+    // Mid-game moves spend an "ongoing" box to create the next one; those
+    // are not finished matches — skip so the list reads as "archived games".
+    if (g.phase === "ongoing") continue;
+    out.push({
+      box: g.box,
+      state: g.state,
+      phase: g.phase,
+      isJoined: g.isJoined,
+      settlementHeight: h,
+      spentTransactionId: spent,
+    });
+  }
+  return out;
 };
 
 /**

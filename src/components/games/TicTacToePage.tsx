@@ -12,7 +12,6 @@ import {
   Flex,
   HStack,
   Heading,
-  Input,
   NumberDecrementStepper,
   NumberIncrementStepper,
   NumberInput,
@@ -34,8 +33,6 @@ import {
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { useWallet } from "../../context/WalletContext";
 import {
-  Board,
-  CELL_EMPTY,
   statusOf,
 } from "../../lib/games/ticTacToeLogic";
 import {
@@ -44,7 +41,8 @@ import {
 import {
   DiscoveredGame,
   fetchAllGames,
-  findCurrentBoxForGame,
+  fetchRecentGameHistory,
+  GameHistorySnapshot,
 } from "../../lib/games/ticTacToeDiscovery";
 import {
   buildCancelGameTx,
@@ -65,7 +63,6 @@ import TicTacToeBoard from "./TicTacToeBoard";
 import TicTacToePractice from "./TicTacToePractice";
 import {
   PendingTx,
-  PendingKind,
   STUCK_AFTER_MS,
   addPendingTx,
   getPendingTxs,
@@ -94,11 +91,11 @@ type SigningKind = "nautilus" | "vault" | null;
 
 export const TicTacToePage: React.FC = () => {
   const toast = useToast();
-  const { colorMode } = useColorMode();
-  const { primaryWallet, user } = useDynamicContext();
+  const { user } = useDynamicContext();
   const { ergoAddress, source } = useWallet();
 
   const [games, setGames] = useState<DiscoveredGame[]>([]);
+  const [gameHistory, setGameHistory] = useState<GameHistorySnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeGame, setActiveGame] = useState<DiscoveredGame | null>(null);
@@ -155,8 +152,12 @@ export const TicTacToePage: React.FC = () => {
   const refreshGames = useCallback(async () => {
     setRefreshing(true);
     try {
-      const out = await fetchAllGames();
+      const [out, hist] = await Promise.all([
+        fetchAllGames(),
+        fetchRecentGameHistory(40).catch(() => [] as GameHistorySnapshot[]),
+      ]);
       setGames(out);
+      setGameHistory(hist);
       // Reconcile pending ops against the fresh chain snapshot so
       // confirmed ops disappear automatically.
       const unspentBoxIds = new Set(out.map((g) => g.box.boxId));
@@ -702,6 +703,8 @@ export const TicTacToePage: React.FC = () => {
               onCreate={handleCreate}
             />
             <Divider />
+            <GameHistoryRail history={gameHistory} />
+            <Divider />
             <GameList
               games={projectedGames}
               loading={loading}
@@ -722,7 +725,91 @@ export const TicTacToePage: React.FC = () => {
 
 // ====================================================================
 
-// ====================================================================
+const EXPLORER_TX_URL = "https://explorer.ergoplatform.com/en/transactions/";
+
+interface GameHistoryRailProps {
+  history: GameHistorySnapshot[];
+}
+
+const GameHistoryRail: React.FC<GameHistoryRailProps> = ({ history }) => {
+  const { colorMode } = useColorMode();
+  const border = colorMode === "light" ? "gray.200" : "whiteAlpha.300";
+
+  const labelFor = (h: GameHistorySnapshot): string => {
+    if (h.phase === "open") return "Cancelled (never joined)";
+    if (h.phase === "won") return "Won (claimed)";
+    if (h.phase === "drawn") return "Draw (archived)";
+    return h.phase;
+  };
+
+  return (
+    <Box borderWidth="1px" borderRadius="md" p={4} borderColor={border}>
+      <Stack spacing={2}>
+        <Heading size="sm">Recent finished games</Heading>
+        <Text fontSize="xs" opacity={0.75}>
+          On-chain boxes at this contract that were later spent (cancel,
+          claim, etc.). Mid-move spends are hidden so this reads as a
+          simple activity log — not every intermediate board state.
+        </Text>
+        {history.length === 0 ? (
+          <Text fontSize="sm" opacity={0.6}>
+            No archived rows yet, or Explorer returned none. Play a few
+            matches and refresh; the list fills from the public indexer
+            (no backend).
+          </Text>
+        ) : (
+          <Box overflowX="auto">
+            <Table size="sm" variant="simple">
+              <Thead>
+                <Tr>
+                  <Th>Outcome</Th>
+                  <Th>Block</Th>
+                  <Th>Wager</Th>
+                  <Th>Pot (last box)</Th>
+                  <Th>Closing tx</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {history.map((h) => (
+                  <Tr key={`${h.box.boxId}-${h.spentTransactionId}`}>
+                    <Td>
+                      <Badge
+                        colorScheme={
+                          h.phase === "won"
+                            ? "green"
+                            : h.phase === "drawn"
+                            ? "gray"
+                            : "orange"
+                        }
+                      >
+                        {labelFor(h)}
+                      </Badge>
+                    </Td>
+                    <Td fontSize="xs">{h.settlementHeight}</Td>
+                    <Td fontSize="xs">{formatErg(h.state.wagerNanoErg)}</Td>
+                    <Td fontSize="xs">{formatErg(BigInt(h.box.value))}</Td>
+                    <Td fontSize="xs">
+                      <Button
+                        as="a"
+                        size="xs"
+                        variant="link"
+                        href={`${EXPLORER_TX_URL}${h.spentTransactionId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {h.spentTransactionId.slice(0, 10)}…
+                      </Button>
+                    </Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          </Box>
+        )}
+      </Stack>
+    </Box>
+  );
+};
 
 interface PendingBannerProps {
   pending: PendingTx[];
@@ -739,8 +826,6 @@ const formatElapsed = (ms: number): string => {
   const rs = s % 60;
   return `${m}m ${rs}s`;
 };
-
-const EXPLORER_TX_URL = "https://explorer.ergoplatform.com/en/transactions/";
 
 const PendingBanner: React.FC<PendingBannerProps> = ({
   pending,

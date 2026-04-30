@@ -28,7 +28,7 @@ import {
   getErgoTxActivity,
   removeErgoTxActivity,
   subscribeErgoTxActivity,
-} from "../lib/ergoTxActivity";
+} from "../../lib/ergoTxActivity";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 const EXPLORER_TX = "https://explorer.ergoplatform.com/en/transactions/";
