@@ -212,6 +212,10 @@ export interface ExplorerBoxLike {
   value: number | string;
   ergoTree?: string;
   additionalRegisters?: Record<string, any>;
+  /** Present once the box has been spent (Explorer `boxes/byErgoTree`). */
+  spentTransactionId?: string | null;
+  settlementHeight?: number;
+  transactionId?: string;
 }
 
 /**
