@@ -1,8 +1,12 @@
-import React, { ReactNode } from "react";
+import React, { ReactNode, useMemo } from "react";
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
 import { EthereumWalletConnectors } from "@dynamic-labs/ethereum";
 import { NautilusWalletConnectors } from "./NautilusConnector";
 import { dynamicAuthRoutesEnabled, dynamicEnvironmentId } from "./appEnv";
+import {
+  dynamicErgoCssOverrides,
+  useDynamicErgoSettingsOverrides,
+} from "./dynamicErgoBranding";
 
 const ENV_ID = dynamicEnvironmentId;
 
@@ -55,18 +59,28 @@ const MissingEnvBanner: React.FC = () => (
 );
 
 export const DynamicProvider: React.FC<Props> = ({ children }) => {
+  const ergoBrandingOverrides = useDynamicErgoSettingsOverrides();
+  const settings = useMemo(
+    () => ({
+      environmentId: ENV_ID || PLACEHOLDER_ENV_ID,
+      /** Required for `cssOverrides` string to apply (SDK injects it next to widget DOM). */
+      shadowDOMEnabled: false,
+      cssOverrides: dynamicErgoCssOverrides,
+      overrides: ergoBrandingOverrides,
+      walletConnectors: [
+        EthereumWalletConnectors,
+        // Surfaces Nautilus inside the DynamicWidget when the user
+        // has the extension installed; auto-hidden otherwise via
+        // `isInstalledOnBrowser()`. See `lib/NautilusConnector.ts`.
+        NautilusWalletConnectors,
+      ],
+    }),
+    [ergoBrandingOverrides]
+  );
+
   return (
     <DynamicContextProvider
-      settings={{
-        environmentId: ENV_ID || PLACEHOLDER_ENV_ID,
-        walletConnectors: [
-          EthereumWalletConnectors,
-          // Surfaces Nautilus inside the DynamicWidget when the user
-          // has the extension installed; auto-hidden otherwise via
-          // `isInstalledOnBrowser()`. See `lib/NautilusConnector.ts`.
-          NautilusWalletConnectors,
-        ],
-      }}
+      settings={settings}
     >
       {dynamicAuthRoutesEnabled && !ENV_ID && <MissingEnvBanner />}
       {children}
