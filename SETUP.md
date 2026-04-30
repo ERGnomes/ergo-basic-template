@@ -21,6 +21,10 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Funding the email vault from Nautilus
+
+On `/dynamic`, after you sign into Dynamic and have a vault address, use **Fund passkey vault from Nautilus** — it connects via **`ergoConnector.nautilus`** (classic dApp flow), independent of Dynamic’s in-widget wallet list. You can send ERG and optionally a token/NFT (`tokenId` + amount).
+
 ## Environment variables
 
 CRA only reads variables prefixed with **`REACT_APP_`** (baked in at **build** time). Set them in `.env`, `.env.local`, or your host (Railway, Vercel, etc.) **before** `npm run build`.

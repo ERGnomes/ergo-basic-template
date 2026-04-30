@@ -73,15 +73,20 @@ export interface SendErgUnsigned {
 }
 
 /**
- * Build a simple P2PK send (ERG only) as an EIP-12 unsigned transaction.
+ * Build a simple P2PK send as an EIP-12 unsigned transaction.
  * Sign with either `sendErg` (vault secret) or Nautilus `sign_tx` + `submit_tx`.
+ *
+ * @param amountNanoErg — nanoERG placed on the **recipient** output (must cover
+ *   min box value when `tokens` is non-empty).
+ * @param tokens — optional tokens (e.g. NFT with amount `1n`) attached to that output.
  */
 export const buildSendErgUnsigned = async (params: {
   fromAddress: string;
   toAddress: string;
   amountNanoErg: bigint;
+  tokens?: Array<{ tokenId: string; amount: bigint }>;
 }): Promise<SendErgUnsigned> => {
-  const { fromAddress, toAddress, amountNanoErg } = params;
+  const { fromAddress, toAddress, amountNanoErg, tokens } = params;
 
   const utxoRes = await fetch(
     `${ERGO_API}/boxes/unspent/byAddress/${encodeURIComponent(fromAddress)}?limit=50`
@@ -107,14 +112,32 @@ export const buildSendErgUnsigned = async (params: {
   const currentHeight: number = explorerHeaders[0].height;
 
   const fleet = await import("@fleet-sdk/core");
-  const { TransactionBuilder, OutputBuilder, RECOMMENDED_MIN_FEE_VALUE } =
-    fleet as any;
+  const {
+    TransactionBuilder,
+    OutputBuilder,
+    RECOMMENDED_MIN_FEE_VALUE,
+    SAFE_MIN_BOX_VALUE,
+  } = fleet as any;
 
   const fee = RECOMMENDED_MIN_FEE_VALUE;
 
+  let recipientErg = amountNanoErg;
+  if (tokens && tokens.length > 0) {
+    if (recipientErg < SAFE_MIN_BOX_VALUE) {
+      recipientErg = SAFE_MIN_BOX_VALUE;
+    }
+  }
+
+  const recipientOut = new OutputBuilder(recipientErg, toAddress);
+  if (tokens && tokens.length > 0) {
+    recipientOut.addTokens(
+      tokens.map((t) => ({ tokenId: t.tokenId, amount: t.amount }))
+    );
+  }
+
   const builderTx = new TransactionBuilder(currentHeight)
     .from(inputs)
-    .to(new OutputBuilder(amountNanoErg, toAddress))
+    .to(recipientOut)
     .sendChangeTo(fromAddress)
     .payFee(fee)
     .build()
