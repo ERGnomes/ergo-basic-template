@@ -13,11 +13,17 @@ import {
   Input,
   Stack,
   Text,
+  Spinner,
   useToast,
 } from "@chakra-ui/react";
 import { buildSendErgUnsigned } from "../lib/ergoSigning";
 import { signAndSubmit } from "../lib/games/signAndSubmit";
 import { recordErgoTxActivity } from "../lib/ergoTxActivity";
+import {
+  fetchAddressBalance,
+  type ExplorerTokenSummary,
+} from "../utils/ergoExplorer";
+import { shortenTokenId } from "../utils/ergo";
 
 const NANOERG_PER_ERG = 1_000_000_000;
 
@@ -26,6 +32,15 @@ const formatErg = (nano: string) => {
   const whole = n / BigInt(NANOERG_PER_ERG);
   const frac = n % BigInt(NANOERG_PER_ERG);
   return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "") || "0"}`;
+};
+
+const WALLET_TOKEN_LIST_CAP = 200;
+
+const applyWalletTokenSelection = (t: ExplorerTokenSummary) => {
+  return {
+    tokenId: t.tokenId,
+    tokenAmount: t.amount === "1" ? "1" : t.amount,
+  };
 };
 
 interface Props {
@@ -61,21 +76,25 @@ export const FundVaultFromNautilus: React.FC<Props> = ({
   const [tokenId, setTokenId] = useState("");
   const [tokenAmount, setTokenAmount] = useState("1");
   const [funding, setFunding] = useState(false);
+  const [walletTokens, setWalletTokens] = useState<ExplorerTokenSummary[]>([]);
+  const [walletTokensLoading, setWalletTokensLoading] = useState(false);
 
-  const refreshNautilusBalance = useCallback(async (addr: string) => {
+  const refreshNautilusFromExplorer = useCallback(async (addr: string) => {
+    setWalletTokensLoading(true);
     try {
-      const res = await fetch(
-        `https://api.ergoplatform.com/api/v1/addresses/${encodeURIComponent(addr)}/balance/total`
-      );
-      if (!res.ok) {
+      const bal = await fetchAddressBalance(addr);
+      if (!bal) {
         setNautilusNano(null);
+        setWalletTokens([]);
         return;
       }
-      const j = await res.json();
-      const conf = j?.confirmed ?? j;
-      setNautilusNano(String(conf?.nanoErgs ?? "0"));
+      setNautilusNano(bal.nanoErgs);
+      setWalletTokens(bal.tokens);
     } catch {
       setNautilusNano(null);
+      setWalletTokens([]);
+    } finally {
+      setWalletTokensLoading(false);
     }
   }, []);
 
@@ -108,7 +127,7 @@ export const FundVaultFromNautilus: React.FC<Props> = ({
       }
       const addr = await w.ergo.get_change_address();
       setNautilusAddr(addr);
-      await refreshNautilusBalance(addr);
+      await refreshNautilusFromExplorer(addr);
       toast({
         title: "Nautilus connected",
         description: `Signing with ${addr.slice(0, 10)}…`,
@@ -124,6 +143,7 @@ export const FundVaultFromNautilus: React.FC<Props> = ({
       });
       setNautilusAddr(null);
       setNautilusNano(null);
+      setWalletTokens([]);
     } finally {
       setConnecting(false);
     }
@@ -133,6 +153,7 @@ export const FundVaultFromNautilus: React.FC<Props> = ({
     disconnectNautilus();
     setNautilusAddr(null);
     setNautilusNano(null);
+    setWalletTokens([]);
     toast({ title: "Nautilus disconnected", status: "info", duration: 2000 });
   };
 
@@ -209,7 +230,7 @@ export const FundVaultFromNautilus: React.FC<Props> = ({
           status: "success",
           duration: 5000,
         });
-        await refreshNautilusBalance(from);
+        await refreshNautilusFromExplorer(from);
       }
       if (!res.ok) {
         toast({
@@ -297,8 +318,82 @@ export const FundVaultFromNautilus: React.FC<Props> = ({
 
           <Divider />
 
+          <HStack justify="space-between" align="center" flexWrap="wrap" spacing={2}>
+            <Text fontSize="xs" fontWeight="semibold">
+              Tokens in this Nautilus address
+            </Text>
+            <Button
+              size="xs"
+              variant="ghost"
+              isLoading={walletTokensLoading}
+              loadingText="Refreshing…"
+              onClick={() => void refreshNautilusFromExplorer(nautilusAddr)}
+            >
+              Refresh from Explorer
+            </Button>
+          </HStack>
+          {walletTokensLoading && walletTokens.length === 0 ? (
+            <HStack spacing={2} fontSize="xs" opacity={0.8}>
+              <Spinner size="xs" />
+              <Text>Loading confirmed balances…</Text>
+            </HStack>
+          ) : walletTokens.length === 0 ? (
+            <Text fontSize="xs" opacity={0.75}>
+              No tokens found on-chain for this address (ERG-only transfer is fine). If you
+              just received assets, use Refresh or wait for confirmation.
+            </Text>
+          ) : (
+            <Box
+              borderWidth="1px"
+              borderRadius="md"
+              maxH="200px"
+              overflowY="auto"
+              p={1}
+              borderColor="whiteAlpha.300"
+            >
+              <Stack spacing={1}>
+                {walletTokens.slice(0, WALLET_TOKEN_LIST_CAP).map((t) => {
+                  const label = t.name?.trim() || shortenTokenId(t.tokenId, 6, 6);
+                  const selected = tokenId.trim() === t.tokenId;
+                  return (
+                    <Button
+                      key={t.tokenId}
+                      size="xs"
+                      variant={selected ? "solid" : "ghost"}
+                      colorScheme={selected ? "teal" : "gray"}
+                      justifyContent="flex-start"
+                      whiteSpace="normal"
+                      h="auto"
+                      py={1}
+                      px={2}
+                      fontWeight="normal"
+                      onClick={() => {
+                        const sel = applyWalletTokenSelection(t);
+                        setTokenId(sel.tokenId);
+                        setTokenAmount(sel.tokenAmount);
+                      }}
+                    >
+                      <Text as="span" fontSize="xs" textAlign="left">
+                        <strong>{label}</strong>
+                        <Text as="span" fontFamily="mono" opacity={0.85} display="block">
+                          × {t.amount}
+                        </Text>
+                      </Text>
+                    </Button>
+                  );
+                })}
+              </Stack>
+              {walletTokens.length > WALLET_TOKEN_LIST_CAP && (
+                <Text fontSize="10px" px={1} pt={1} opacity={0.65}>
+                  Showing first {WALLET_TOKEN_LIST_CAP} of {walletTokens.length} tokens. Narrow
+                  by pasting an ID below if needed.
+                </Text>
+              )}
+            </Box>
+          )}
+
           <Text fontSize="xs" fontWeight="semibold">
-            Optional token / NFT
+            Optional token / NFT (manual or pick above)
           </Text>
           <Input
             placeholder="Token ID (hex, 64 chars) — leave empty for ERG-only"
