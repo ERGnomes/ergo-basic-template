@@ -35,6 +35,8 @@ A modular React template for building applications on the Ergo blockchain. This 
 
 ## 🚀 Getting Started
 
+**Full setup (env vars, Dynamic vs Nautilus modes, Railway): see [SETUP.md](./SETUP.md).**
+
 1. Clone this repository:
    ```
    git clone https://github.com/yourusername/ergo-basic-template.git

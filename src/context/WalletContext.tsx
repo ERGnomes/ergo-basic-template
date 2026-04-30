@@ -18,6 +18,10 @@ import {
 import { findExistingVault } from "../lib/ergoKeyVault";
 import { VaultRecord } from "../lib/vaultStorage";
 import { isErgoWallet } from "../lib/NautilusConnector";
+import {
+  nautilusDirectAddressFallbackEnabled,
+  walletProviderMode,
+} from "../lib/appEnv";
 
 /**
  * WalletContext is the unified surface the rest of the app reads from
@@ -46,8 +50,12 @@ const WALLET_AUTO_CONNECT_KEY = "ergo_wallet_auto_connect";
 
 interface WalletContextType {
   walletData: WalletData;
-  /** Opens the Dynamic auth flow (replaces direct Nautilus connect). */
+  /** Opens Dynamic auth when enabled; otherwise no-op. */
   connectToWallet: () => Promise<void>;
+  /** Connect Nautilus via EIP-12 without opening Dynamic (when enabled by env). */
+  connectWithNautilusDirect: () => Promise<void>;
+  /** Navbar / dashboard: Dynamic in dynamic+both modes, Nautilus in nautilus-only. */
+  connectPrimaryWallet: () => Promise<void>;
   /** Logs the user out of Dynamic and clears local state. */
   disconnectFromWallet: () => Promise<void>;
   /** Re-fetches balance + tokens for the current address. */
@@ -71,6 +79,8 @@ const defaultWalletData: WalletData = {
 const WalletContext = createContext<WalletContextType>({
   walletData: defaultWalletData,
   connectToWallet: async () => {},
+  connectWithNautilusDirect: async () => {},
+  connectPrimaryWallet: async () => {},
   disconnectFromWallet: async () => {},
   refreshWallet: async () => {},
   ergoAddress: null,
@@ -92,6 +102,9 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   const [walletData, setWalletData] = useState<WalletData>(defaultWalletData);
   const [ergoAddress, setErgoAddress] = useState<string | null>(null);
   const [source, setSource] = useState<WalletContextType["source"]>(null);
+  /** Set when the user connects Nautilus from the navbar without Dynamic. */
+  const [nautilusDirectAddr, setNautilusDirectAddr] = useState<string | null>(null);
+  const nautilusAutoTried = useRef(false);
 
   const [autoConnectEnabled, setAutoConnectEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem(WALLET_AUTO_CONNECT_KEY);
@@ -134,19 +147,30 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
         }
       }
 
-      // 3) Legacy direct Nautilus (window.ergo populated outside Dynamic).
-      try {
-        const w = window as any;
-        if (w.ergo && typeof w.ergo.get_change_address === "function") {
-          const addr = await w.ergo.get_change_address();
-          if (!cancelled && addr) {
-            setErgoAddress(addr);
-            setSource("nautilus-direct");
-            return;
-          }
+      // 3) Navbar "Connect Nautilus" (explicit direct session).
+      if (nautilusDirectAddr) {
+        if (!cancelled) {
+          setErgoAddress(nautilusDirectAddr);
+          setSource("nautilus-direct");
         }
-      } catch {
-        // ignore
+        return;
+      }
+
+      // 4) Legacy direct Nautilus (window.ergo populated outside Dynamic).
+      if (nautilusDirectAddressFallbackEnabled) {
+        try {
+          const w = window as any;
+          if (w.ergo && typeof w.ergo.get_change_address === "function") {
+            const addr = await w.ergo.get_change_address();
+            if (!cancelled && addr) {
+              setErgoAddress(addr);
+              setSource("nautilus-direct");
+              return;
+            }
+          }
+        } catch {
+          // ignore
+        }
       }
 
       if (!cancelled) {
@@ -158,7 +182,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [primaryWallet, user]);
+  }, [primaryWallet, user, nautilusDirectAddr]);
 
   // Whenever the address changes, refresh balance + tokens.
   const refreshSeq = useRef(0);
@@ -204,11 +228,53 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   }, [ergoAddress, loadDataForAddress]);
 
   const connectToWallet = useCallback(async () => {
-    // The single canonical "Connect" action is now the Dynamic widget.
-    // Email + Nautilus both live inside it.
+    setNautilusDirectAddr(null);
     setShowAuthFlow(true);
     setAutoConnect(true);
-  }, [setShowAuthFlow]);
+  }, [setShowAuthFlow, setAutoConnect]);
+
+  const connectWithNautilusDirect = useCallback(async () => {
+    const w = window as any;
+    if (!w.ergoConnector?.nautilus) {
+      throw new Error(
+        "Nautilus extension not detected. Install Nautilus and reload this page."
+      );
+    }
+    const granted = await w.ergoConnector.nautilus.connect();
+    if (!granted) {
+      throw new Error("Nautilus connection was rejected.");
+    }
+    if (!w.ergo?.get_change_address) {
+      throw new Error("Nautilus connected but window.ergo is not available.");
+    }
+    const addr = await w.ergo.get_change_address();
+    setNautilusDirectAddr(addr);
+    setAutoConnect(true);
+  }, [setAutoConnect]);
+
+  const connectPrimaryWallet = useCallback(async () => {
+    if (walletProviderMode === "nautilus") {
+      await connectWithNautilusDirect();
+    } else {
+      await connectToWallet();
+    }
+  }, [walletProviderMode, connectToWallet, connectWithNautilusDirect]);
+
+  // Nautilus-only builds: optional one-shot auto-connect when the user enabled it.
+  useEffect(() => {
+    if (walletProviderMode !== "nautilus") return;
+    if (!autoConnectEnabled || nautilusAutoTried.current) return;
+    if (ergoAddress) return;
+    nautilusAutoTried.current = true;
+    void connectWithNautilusDirect().catch(() => {
+      // Extension missing or user rejected — stay disconnected.
+    });
+  }, [
+    walletProviderMode,
+    autoConnectEnabled,
+    ergoAddress,
+    connectWithNautilusDirect,
+  ]);
 
   const disconnectFromWallet = useCallback(async () => {
     try {
@@ -219,6 +285,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     setWalletData(defaultWalletData);
     setErgoAddress(null);
     setSource(null);
+    setNautilusDirectAddr(null);
     setAutoConnect(false);
   }, [handleLogOut]);
 
@@ -227,6 +294,8 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       value={{
         walletData,
         connectToWallet,
+        connectWithNautilusDirect,
+        connectPrimaryWallet,
         disconnectFromWallet,
         refreshWallet,
         ergoAddress,
