@@ -10,6 +10,8 @@ import {
   Code,
   Divider,
   Flex,
+  FormControl,
+  FormLabel,
   HStack,
   Heading,
   Modal,
@@ -26,6 +28,7 @@ import {
   NumberInputStepper,
   Spinner,
   Stack,
+  Switch,
   Table,
   Tbody,
   Td,
@@ -120,6 +123,7 @@ export const TicTacToePage: React.FC = () => {
   const [wagerErg, setWagerErg] = useState<number>(DEFAULT_WAGER_ERG);
   const [myPubKey, setMyPubKey] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingTx[]>(() => getPendingTxs());
+  const [practiceModeOpen, setPracticeModeOpen] = useState(false);
 
   // Subscribe to pending-tx changes anywhere in the app (cross-tab,
   // in-tab re-renders after add / remove).
@@ -622,7 +626,7 @@ export const TicTacToePage: React.FC = () => {
   // Render.
   // ------------------------------------------------------------------
 
-  // Always-on shell: header + practice board + warnings. The on-chain
+  // Page shell: header + optional practice board + warnings. The on-chain
   // lobby only layers on top once the user is connected.
   //
   // Note: we don't UA-sniff for Firefox any more — modern Firefox has
@@ -656,7 +660,24 @@ export const TicTacToePage: React.FC = () => {
         </Stack>
       </Alert>
 
-      <TicTacToePractice />
+      <Stack spacing={2}>
+        <FormControl display="flex" alignItems="center" gap={3}>
+          <FormLabel htmlFor="tic-practice-mode" mb={0} fontWeight="medium">
+            Show practice mode
+          </FormLabel>
+          <Switch
+            id="tic-practice-mode"
+            isChecked={practiceModeOpen}
+            onChange={(e) => setPracticeModeOpen(e.target.checked)}
+            colorScheme="purple"
+          />
+        </FormControl>
+        <Text fontSize="sm" opacity={0.75}>
+          Turn this on to try the board locally — no wallet or ERG. Handy for
+          testing the UI or explaining the rules before you wager on-chain.
+        </Text>
+        {practiceModeOpen ? <TicTacToePractice /> : null}
+      </Stack>
     </>
   );
 
@@ -670,8 +691,9 @@ export const TicTacToePage: React.FC = () => {
             <AlertDescription fontSize="sm">
               Sign in from the <Code>Dashboard</Code> or{" "}
               <Code>Dynamic Login</Code> page (with email or Nautilus)
-              to create and join real on-chain games. Practice mode
-              above works without any wallet.
+              to create and join real on-chain games. Enable{" "}
+              <strong>Show practice mode</strong> above to try the board
+              without a wallet.
             </AlertDescription>
           </Alert>
         </VStack>
@@ -1193,11 +1215,11 @@ const GameList: React.FC<GameListProps> = ({
             joins.
           </Text>
           <Text fontSize="xs" opacity={0.55}>
-            To play against yourself for testing, use Practice mode at
-            the top of the page. The contract requires two different
-            wallets for real games, so you'd need Nautilus in one
-            browser and Dynamic email-login in another (or two Dynamic
-            accounts).
+            To play against yourself for testing, turn on{" "}
+            <strong>Show practice mode</strong> at the top of the page.
+            The contract requires two different wallets for real games,
+            so you'd need Nautilus in one browser and Dynamic email-login
+            in another (or two Dynamic accounts).
           </Text>
         </Stack>
       ) : (
