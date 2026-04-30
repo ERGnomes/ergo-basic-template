@@ -14,12 +14,18 @@ import {
   useDisclosure,
   useColorMode,
   Center,
+  useToast,
 } from "@chakra-ui/react";
 import { FaWallet, FaChevronDown } from 'react-icons/fa';
 import { 
   formatTokenAmount
 } from '../../utils/ergo';
 import { useWallet } from '../../context/WalletContext';
+import {
+  dynamicAuthRoutesEnabled,
+  nautilusDirectEnabled,
+  walletProviderMode,
+} from '../../lib/appEnv';
 
 export interface WalletData {
   isConnected: boolean;
@@ -29,12 +35,51 @@ export interface WalletData {
 }
 
 export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
-  const { walletData, connectToWallet, disconnectFromWallet, autoConnectEnabled, setAutoConnect } = useWallet();
+  const {
+    walletData,
+    connectToWallet,
+    connectWithNautilusDirect,
+    connectPrimaryWallet,
+    disconnectFromWallet,
+    autoConnectEnabled,
+    setAutoConnect,
+    source,
+  } = useWallet();
+  const toast = useToast();
   const { isOpen, onOpen, onClose } = useDisclosure();
   const { isConnected, ergBalance, tokens = [], walletStatus } = walletData;
   const { colorMode } = useColorMode();
+  const sourceLabel = source === 'dynamic-nautilus'
+    ? 'Nautilus (via Dynamic)'
+    : source === 'vault'
+    ? 'Email + passkey vault'
+    : source === 'nautilus-direct'
+    ? 'Nautilus (direct)'
+    : null;
   
-  useImperativeHandle(ref, () => connectToWallet);
+  useImperativeHandle(ref, () => connectPrimaryWallet);
+
+  const disconnectedLabel =
+    walletProviderMode === "nautilus"
+      ? "Connect"
+      : walletProviderMode === "dynamic"
+      ? "Sign in"
+      : "Sign in";
+
+  const handleNautilusMenu = async () => {
+    try {
+      await connectWithNautilusDirect();
+      onClose();
+    } catch (e: any) {
+      toast({
+        title: "Could not connect Nautilus",
+        description: e?.message || String(e),
+        status: "error",
+        duration: 6000,
+        isClosable: true,
+      });
+    }
+  };
 
   return (
     <Menu isOpen={isOpen} onOpen={onOpen} onClose={onClose}>
@@ -52,25 +97,62 @@ export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
       >
         <Flex align="center">
           <Icon as={FaWallet} mr={2} color={isConnected ? (colorMode === 'light' ? 'ergnome.greenAccent.light' : 'ergnome.green') : (colorMode === 'light' ? 'ergnome.redAccent.light' : 'ergnome.red')} />
-          <Text>{isConnected ? `${formatTokenAmount(ergBalance)} ERG` : 'Connect Wallet'}</Text>
+          <Text>
+            {isConnected
+              ? `${formatTokenAmount(ergBalance)} ERG`
+              : disconnectedLabel}
+          </Text>
         </Flex>
       </MenuButton>
       <MenuList zIndex={2} minW="280px" width="280px" p={1}>
         {!isConnected ? (
           <>
-            <MenuItem onClick={connectToWallet} icon={<Icon as={FaWallet} color={colorMode === 'light' ? 'ergnome.blueAccent.light' : 'ergnome.blue'} />}>
-              Connect to Wallet
-            </MenuItem>
-            <MenuItem onClick={() => setAutoConnect(!autoConnectEnabled)}>
-              <Flex align="center" justify="space-between" w="100%">
-                <Text>Auto-connect on startup</Text>
-                <Switch 
-                  isChecked={autoConnectEnabled} 
-                  onChange={(e) => setAutoConnect(e.target.checked)}
-                  colorScheme="blue"
-                />
-              </Flex>
-            </MenuItem>
+            {dynamicAuthRoutesEnabled && (
+              <MenuItem
+                onClick={connectToWallet}
+                icon={
+                  <Icon
+                    as={FaWallet}
+                    color={
+                      colorMode === "light"
+                        ? "ergnome.blueAccent.light"
+                        : "ergnome.blue"
+                    }
+                  />
+                }
+              >
+                Sign in with Dynamic
+              </MenuItem>
+            )}
+            {nautilusDirectEnabled && (
+              <MenuItem
+                onClick={handleNautilusMenu}
+                icon={
+                  <Icon
+                    as={FaWallet}
+                    color={
+                      colorMode === "light"
+                        ? "ergnome.orangeAccent.light"
+                        : "ergnome.orange"
+                    }
+                  />
+                }
+              >
+                Connect with Nautilus
+              </MenuItem>
+            )}
+            {dynamicAuthRoutesEnabled && (
+              <MenuItem onClick={() => setAutoConnect(!autoConnectEnabled)}>
+                <Flex align="center" justify="space-between" w="100%">
+                  <Text>Auto-open Dynamic on startup</Text>
+                  <Switch
+                    isChecked={autoConnectEnabled}
+                    onChange={(e) => setAutoConnect(e.target.checked)}
+                    colorScheme="blue"
+                  />
+                </Flex>
+              </MenuItem>
+            )}
           </>
         ) : (
           <>
@@ -80,6 +162,14 @@ export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
                 <Text color={colorMode === 'light' ? 'ergnome.greenAccent.light' : 'ergnome.green'}>{walletStatus}</Text>
               </Flex>
             </MenuItem>
+            {sourceLabel && (
+              <MenuItem closeOnSelect={false} px={4}>
+                <Flex align="center" justify="space-between" w="100%">
+                  <Text fontWeight="bold">Source:</Text>
+                  <Text>{sourceLabel}</Text>
+                </Flex>
+              </MenuItem>
+            )}
             <MenuItem closeOnSelect={false} px={4}>
               <Flex align="center" justify="space-between" w="100%">
                 <Text fontWeight="bold">ERG Balance:</Text>
@@ -88,11 +178,12 @@ export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
             </MenuItem>
             <MenuItem closeOnSelect={false} px={4}>
               <Flex align="center" justify="space-between" w="100%">
-                <Text>Auto-connect on startup</Text>
-                <Switch 
-                  isChecked={autoConnectEnabled} 
+                <Text>Auto-open Dynamic on startup</Text>
+                <Switch
+                  isChecked={autoConnectEnabled}
                   onChange={(e) => setAutoConnect(e.target.checked)}
                   colorScheme="blue"
+                  isDisabled={!dynamicAuthRoutesEnabled}
                 />
               </Flex>
             </MenuItem>
@@ -230,7 +321,7 @@ export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
               </MenuItem>
             )}
             <MenuItem onClick={disconnectFromWallet} closeOnSelect={true} px={4}>
-              Disconnect Wallet
+              Disconnect
             </MenuItem>
           </>
         )}

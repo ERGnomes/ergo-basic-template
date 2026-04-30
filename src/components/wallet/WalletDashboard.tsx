@@ -16,17 +16,32 @@ import {
   TabPanels,
   Tabs,
   HStack,
-  Badge
+  Badge,
+  useToast,
 } from "@chakra-ui/react";
 import { FaWallet } from 'react-icons/fa';
 import { useWallet } from '../../context/WalletContext';
+import { walletProviderMode } from '../../lib/appEnv';
 import { TokenCard, TokenData } from '../common/TokenCard';
 import { TokenModal } from '../common/TokenModal';
 import { processTokens, filterNFTs, filterFungibleTokens, groupByCollection } from '../../utils/tokenProcessing';
+import { HowItWorks } from '../onboarding/HowItWorks';
+import { HowToGetErg } from '../onboarding/HowToGetErg';
+import { AddressCard } from '../onboarding/AddressCard';
 
 export const WalletDashboard: React.FC = () => {
-  const { walletData, connectToWallet } = useWallet();
+  const toast = useToast();
+  const { walletData, connectPrimaryWallet, ergoAddress, source } = useWallet();
   const { isConnected, ergBalance, tokens: rawTokens, walletStatus } = walletData;
+  const hasZeroBalance = isConnected && Number(ergBalance) === 0 && rawTokens.length === 0;
+  const sourceLabel =
+    source === 'dynamic-nautilus'
+      ? 'Nautilus'
+      : source === 'vault'
+      ? 'Email + passkey'
+      : source === 'nautilus-direct'
+      ? 'Nautilus (direct)'
+      : null;
   const { colorMode } = useColorMode();
   const [selectedToken, setSelectedToken] = useState<TokenData | null>(null);
   const [processedTokens, setProcessedTokens] = useState<TokenData[]>([]);
@@ -71,33 +86,69 @@ export const WalletDashboard: React.FC = () => {
 
   if (!isConnected) {
     return (
-      <VStack spacing={6} p={10} align="center">
-        <Heading 
-          as="h2" 
-          size="2xl" 
-          bgGradient="linear(to-r, ergnome.blue, ergnome.purple)" 
-          bgClip="text"
-        >
-          Ergo Wallet Explorer
-        </Heading>
-        <Text fontSize="xl" color={colorMode === 'light' ? 'ergnome.text.light' : 'ergnome.text.dark'} textAlign="center" maxW="600px">
-          Connect your Nautilus wallet to see your ERG balance and NFTs!
-        </Text>
-        <Button 
-          size="lg" 
-          leftIcon={<Icon as={FaWallet} />}
-          onClick={connectToWallet}
-          bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
-          color="white"
-          _hover={{
-            bgGradient: "linear(to-r, ergnome.purple, ergnome.blue)",
-          }}
-          px={8}
-          py={6}
-          fontSize="xl"
-        >
-          Connect Wallet
-        </Button>
+      <VStack spacing={8} p={10} align="center" maxW="1000px" mx="auto">
+        <VStack spacing={4} align="center">
+          <Heading
+            as="h2"
+            size="2xl"
+            bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
+            bgClip="text"
+            textAlign="center"
+          >
+            Welcome to Ergo
+          </Heading>
+          <Text
+            fontSize="lg"
+            color={colorMode === 'light' ? 'ergnome.text.light' : 'ergnome.text.dark'}
+            textAlign="center"
+            maxW="650px"
+          >
+            {walletProviderMode === "nautilus"
+              ? "Connect with the Nautilus browser extension to view balances, NFTs, and use Ergo features in this template."
+              : walletProviderMode === "dynamic"
+              ? "Sign in with Dynamic.xyz for email + passkey vault Ergo signing, or pick Nautilus inside the Dynamic widget if you have it installed."
+              : "Sign in with Dynamic.xyz (email + passkey vault, or Nautilus inside the widget), or connect Nautilus directly from the header menu."}
+          </Text>
+          <Button
+            size="lg"
+            leftIcon={<Icon as={FaWallet} />}
+            onClick={async () => {
+              try {
+                await connectPrimaryWallet();
+              } catch (e: any) {
+                toast({
+                  title: "Connection failed",
+                  description: e?.message || String(e),
+                  status: "error",
+                  duration: 7000,
+                  isClosable: true,
+                });
+              }
+            }}
+            bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
+            color="white"
+            _hover={{
+              bgGradient: "linear(to-r, ergnome.purple, ergnome.blue)",
+            }}
+            px={8}
+            py={6}
+            fontSize="xl"
+          >
+            {walletProviderMode === "nautilus"
+              ? "Connect with Nautilus"
+              : walletProviderMode === "dynamic"
+              ? "Sign in with Dynamic"
+              : "Get started"}
+          </Button>
+          {walletProviderMode === "both" && (
+            <Text fontSize="sm" opacity={0.75} textAlign="center">
+              Tip: use the <strong>header wallet menu</strong> to choose Dynamic or
+              Nautilus.
+            </Text>
+          )}
+        </VStack>
+
+        <HowItWorks />
       </VStack>
     );
   }
@@ -127,7 +178,11 @@ export const WalletDashboard: React.FC = () => {
           boxShadow="0 4px 20px rgba(65, 157, 217, 0.2)"
         >
           <VStack spacing={4} align="flex-start">
-            <Heading size="lg" color={colorMode === 'light' ? 'ergnome.blueAccent.light' : 'ergnome.blue'}>Wallet Overview</Heading>
+            <HStack w="100%" justify="space-between">
+              <Heading size="lg" color={colorMode === 'light' ? 'ergnome.blueAccent.light' : 'ergnome.blue'}>Wallet Overview</Heading>
+              {sourceLabel && <Badge colorScheme="blue">{sourceLabel}</Badge>}
+            </HStack>
+            {ergoAddress && <AddressCard address={ergoAddress} />}
             <Flex justify="space-between" w="100%">
               <Text fontSize="lg">Status:</Text>
               <Text fontSize="lg" color={colorMode === 'light' ? 'ergnome.greenAccent.light' : 'ergnome.green'} fontWeight="bold">{walletStatus}</Text>
@@ -146,6 +201,8 @@ export const WalletDashboard: React.FC = () => {
             </Flex>
           </VStack>
         </Box>
+
+        {hasZeroBalance && ergoAddress && <HowToGetErg address={ergoAddress} />}
 
         {processedTokens.length > 0 && (
           <Box 
