@@ -1,34 +1,82 @@
-import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import { connectWallet, disconnectWallet, isWalletConnected, getTokensFromUtxos, formatErgAmount } from '../utils/ergo';
-import { WalletData } from '../components/wallet/WalletConnector';
-import { processTokens } from '../utils/tokenProcessing';
+import React, {
+  createContext,
+  useState,
+  useContext,
+  useEffect,
+  ReactNode,
+  useCallback,
+  useRef,
+} from "react";
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { WalletData } from "../components/wallet/WalletConnector";
+import { processTokens } from "../utils/tokenProcessing";
+import {
+  fetchAddressBalance,
+  enrichTokens,
+  formatErgFromNano,
+} from "../utils/ergoExplorer";
+import { findExistingVault } from "../lib/ergoKeyVault";
+import { VaultRecord } from "../lib/vaultStorage";
+import { isErgoWallet } from "../lib/NautilusConnector";
 
-// Storage key for wallet connection preference
-const WALLET_AUTO_CONNECT_KEY = 'ergo_wallet_auto_connect';
+/**
+ * WalletContext is the unified surface the rest of the app reads from
+ * (WalletDashboard, NFTGallery, navbar widget, etc.).
+ *
+ * It bridges three sources, in priority order:
+ *
+ *   1. The user's primary Dynamic wallet (e.g. Nautilus picked inside
+ *      the DynamicWidget). Address comes straight from the connector.
+ *
+ *   2. The user's encrypted vault, if they're logged in via email and
+ *      have already provisioned the passkey-encrypted Ergo wallet.
+ *      We don't need the seed unlocked to read balance/tokens — the
+ *      Ergo address is stored on the public part of the vault record.
+ *
+ *   3. (Legacy fallback) A direct Nautilus connection, if the user
+ *      somehow connected without going through Dynamic. We keep this
+ *      so older WalletConnector dropdowns don't break, but the
+ *      "Connect" action no longer triggers it.
+ *
+ * Whichever source resolves first wins, and the rest of the app sees
+ * a single `walletData.isConnected = true` regardless of which path.
+ */
+
+const WALLET_AUTO_CONNECT_KEY = "ergo_wallet_auto_connect";
 
 interface WalletContextType {
   walletData: WalletData;
+  /** Opens the Dynamic auth flow (replaces direct Nautilus connect). */
   connectToWallet: () => Promise<void>;
+  /** Logs the user out of Dynamic and clears local state. */
   disconnectFromWallet: () => Promise<void>;
-  checkWalletConnection: () => Promise<boolean>;
+  /** Re-fetches balance + tokens for the current address. */
+  refreshWallet: () => Promise<void>;
+  /** Active Ergo address feeding the dashboard, or null. */
+  ergoAddress: string | null;
+  /** Source of the active address, for UI hints. */
+  source: "dynamic-nautilus" | "vault" | "nautilus-direct" | null;
+  /** Kept for API compatibility with the old auto-connect toggle. */
   setAutoConnect: (enabled: boolean) => void;
   autoConnectEnabled: boolean;
 }
 
 const defaultWalletData: WalletData = {
   isConnected: false,
-  ergBalance: '0',
+  ergBalance: "0",
   tokens: [],
-  walletStatus: 'Not connected'
+  walletStatus: "Not connected",
 };
 
 const WalletContext = createContext<WalletContextType>({
   walletData: defaultWalletData,
   connectToWallet: async () => {},
   disconnectFromWallet: async () => {},
-  checkWalletConnection: async () => false,
+  refreshWallet: async () => {},
+  ergoAddress: null,
+  source: null,
   setAutoConnect: () => {},
-  autoConnectEnabled: false
+  autoConnectEnabled: false,
 });
 
 export const useWallet = () => useContext(WalletContext);
@@ -38,180 +86,156 @@ interface WalletProviderProps {
 }
 
 export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
+  const { primaryWallet, user, handleLogOut, setShowAuthFlow } =
+    useDynamicContext();
+
   const [walletData, setWalletData] = useState<WalletData>(defaultWalletData);
+  const [ergoAddress, setErgoAddress] = useState<string | null>(null);
+  const [source, setSource] = useState<WalletContextType["source"]>(null);
+
   const [autoConnectEnabled, setAutoConnectEnabled] = useState<boolean>(() => {
-    // Initialize from localStorage
-    const savedPreference = localStorage.getItem(WALLET_AUTO_CONNECT_KEY);
-    return savedPreference === 'true';
+    const saved = localStorage.getItem(WALLET_AUTO_CONNECT_KEY);
+    return saved === "true";
   });
 
-  // Function to set auto-connect preference and save to localStorage
   const setAutoConnect = (enabled: boolean) => {
     setAutoConnectEnabled(enabled);
-    localStorage.setItem(WALLET_AUTO_CONNECT_KEY, enabled ? 'true' : 'false');
+    localStorage.setItem(WALLET_AUTO_CONNECT_KEY, enabled ? "true" : "false");
   };
 
-  // Define connectToWallet before it's used in checkWalletConnection
-  const connectToWallet = async (): Promise<void> => {
-    try {
-      console.log("Connecting to wallet...");
-      const connected = await connectWallet();
-      console.log("connectWallet result:", connected);
-      
-      if (connected) {
-        // Save auto-connect preference when successful connection is made
-        setAutoConnect(true);
-        
-        // Ensure ergo context is initialized
-        console.log("Ergo connector present:", !!window.ergoConnector, "Ergo present:", !!window.ergo);
-        if (window.ergoConnector && !window.ergo) {
-          console.log("Getting ergo context...");
-          try {
-            window.ergo = await window.ergoConnector.nautilus.getContext();
-            console.log("Context retrieved successfully:", !!window.ergo);
-          } catch (contextError) {
-            console.error("Error getting context:", contextError);
-            throw contextError;
+  // Resolve the best Ergo address for the current session.
+  useEffect(() => {
+    let cancelled = false;
+    const resolveAddress = async () => {
+      // 1) Nautilus picked through the Dynamic widget.
+      if (isErgoWallet(primaryWallet)) {
+        try {
+          const w = window as any;
+          const addr =
+            w.ergo && (await w.ergo.get_change_address?.());
+          if (!cancelled && addr) {
+            setErgoAddress(addr);
+            setSource("dynamic-nautilus");
+            return;
+          }
+        } catch {
+          // fall through to vault lookup
+        }
+      }
+
+      // 2) Email login → vault. The vault record already contains the
+      //    Ergo address publicly; no unlock needed for read-only state.
+      if (user) {
+        const vault: VaultRecord | null = findExistingVault(user as any);
+        if (!cancelled && vault?.ergoAddress) {
+          setErgoAddress(vault.ergoAddress);
+          setSource("vault");
+          return;
+        }
+      }
+
+      // 3) Legacy direct Nautilus (window.ergo populated outside Dynamic).
+      try {
+        const w = window as any;
+        if (w.ergo && typeof w.ergo.get_change_address === "function") {
+          const addr = await w.ergo.get_change_address();
+          if (!cancelled && addr) {
+            setErgoAddress(addr);
+            setSource("nautilus-direct");
+            return;
           }
         }
-        
-        try {
-          // Get UTXOs
-          console.log("Getting UTXOs...");
-          const utxos = await window.ergo.get_utxos();
-          console.log("UTXOs retrieved, count:", utxos.length);
-          
-          // Calculate ERG balance
-          const totalErg = utxos.reduce((acc: number, utxo: any) => {
-            return acc + parseInt(utxo.value);
-          }, 0);
-          
-          const formattedErgBalance = formatErgAmount(totalErg);
-          console.log("ERG balance calculated:", formattedErgBalance);
-          
-          // Get all tokens
-          console.log("Getting tokens from UTXOs...");
-          const rawTokens = await getTokensFromUtxos(utxos);
-          console.log("Token retrieval complete, count:", rawTokens.length);
-          
-          // Process tokens with our enhanced processing
-          console.log("Processing tokens...");
-          const processedTokens = processTokens(rawTokens, {
-            metadataOptions: { extractTraits: true },
-            detectCollections: true,
-            generatePlaceholderImage: true
-          });
-          console.log("Token processing complete");
-          
-          // Update wallet data
-          setWalletData({
-            isConnected: true,
-            ergBalance: formattedErgBalance,
-            tokens: processedTokens,
-            walletStatus: 'Connected'
-          });
-          
-          console.log("Wallet connected successfully");
-        } catch (operationError: unknown) {
-          console.error("Error performing wallet operations:", operationError);
-          setWalletData({
-            ...defaultWalletData,
-            walletStatus: 'Error: ' + (operationError instanceof Error ? operationError.message : String(operationError))
-          });
-          throw operationError;
-        }
-      } else {
-        setWalletData({
-          ...defaultWalletData,
-          walletStatus: 'Connection failed'
-        });
-        console.log("Wallet connection failed");
+      } catch {
+        // ignore
       }
-    } catch (error) {
-      console.error('Error connecting to wallet:', error);
-      setWalletData({
-        ...defaultWalletData,
-        walletStatus: 'Error: ' + (error instanceof Error ? error.message : String(error))
-      });
-    }
-  };
 
-  // Define checkWalletConnection before it's used in useEffect
-  const checkWalletConnection = async (): Promise<boolean> => {
-    try {
-      const connected = await isWalletConnected();
-      
-      // If wallet state has changed, update it
-      if (connected !== walletData.isConnected) {
-        if (connected) {
-          await connectToWallet();
-        } else {
-          setWalletData(defaultWalletData);
-        }
-      }
-      
-      return connected;
-    } catch (error) {
-      console.error('Error checking wallet connection:', error);
-      return false;
-    }
-  };
-
-  // Try to auto-connect on first load
-  useEffect(() => {
-    const initWallet = async () => {
-      console.log("Initializing wallet, auto-connect:", autoConnectEnabled);
-      
-      // First check if wallet is already connected
-      const connected = await isWalletConnected();
-      
-      if (connected) {
-        console.log("Wallet already connected, initializing...");
-        await connectToWallet();
-      } else if (autoConnectEnabled) {
-        console.log("Auto-connect enabled, attempting to connect...");
-        await connectToWallet();
+      if (!cancelled) {
+        setErgoAddress(null);
+        setSource(null);
       }
     };
-    
-    initWallet();
-    
-    // Set up timer to periodically check wallet connection
-    const interval = setInterval(async () => {
-      await checkWalletConnection();
-    }, 10000); // Check every 10 seconds
-    
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    resolveAddress();
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryWallet, user]);
+
+  // Whenever the address changes, refresh balance + tokens.
+  const refreshSeq = useRef(0);
+  const loadDataForAddress = useCallback(async (addr: string) => {
+    const seq = ++refreshSeq.current;
+    setWalletData((prev) => ({ ...prev, walletStatus: "Loading…" }));
+    const balance = await fetchAddressBalance(addr);
+    if (seq !== refreshSeq.current) return;
+    if (!balance) {
+      setWalletData({
+        isConnected: true,
+        ergBalance: "0",
+        tokens: [],
+        walletStatus: "Connected (balance unavailable)",
+      });
+      return;
+    }
+    const enriched = await enrichTokens(balance.tokens);
+    if (seq !== refreshSeq.current) return;
+    const processed = processTokens(enriched, {
+      metadataOptions: { extractTraits: true },
+      detectCollections: true,
+      generatePlaceholderImage: true,
+    });
+    setWalletData({
+      isConnected: true,
+      ergBalance: formatErgFromNano(balance.nanoErgs),
+      tokens: processed,
+      walletStatus: "Connected",
+    });
   }, []);
 
-  const disconnectFromWallet = async (): Promise<void> => {
-    try {
-      await disconnectWallet();
-      // When user explicitly disconnects, disable auto-connect
-      setAutoConnect(false);
+  useEffect(() => {
+    if (!ergoAddress) {
       setWalletData(defaultWalletData);
-    } catch (error) {
-      console.error('Error disconnecting wallet:', error);
-      setWalletData({
-        ...walletData,
-        walletStatus: 'Error disconnecting'
-      });
+      return;
     }
-  };
+    loadDataForAddress(ergoAddress);
+  }, [ergoAddress, loadDataForAddress]);
 
-  const contextValue: WalletContextType = {
-    walletData,
-    connectToWallet,
-    disconnectFromWallet,
-    checkWalletConnection,
-    setAutoConnect,
-    autoConnectEnabled
-  };
+  const refreshWallet = useCallback(async () => {
+    if (ergoAddress) await loadDataForAddress(ergoAddress);
+  }, [ergoAddress, loadDataForAddress]);
+
+  const connectToWallet = useCallback(async () => {
+    // The single canonical "Connect" action is now the Dynamic widget.
+    // Email + Nautilus both live inside it.
+    setShowAuthFlow(true);
+    setAutoConnect(true);
+  }, [setShowAuthFlow]);
+
+  const disconnectFromWallet = useCallback(async () => {
+    try {
+      await handleLogOut();
+    } catch {
+      // ignore — local state is wiped below regardless.
+    }
+    setWalletData(defaultWalletData);
+    setErgoAddress(null);
+    setSource(null);
+    setAutoConnect(false);
+  }, [handleLogOut]);
 
   return (
-    <WalletContext.Provider value={contextValue}>
+    <WalletContext.Provider
+      value={{
+        walletData,
+        connectToWallet,
+        disconnectFromWallet,
+        refreshWallet,
+        ergoAddress,
+        source,
+        setAutoConnect,
+        autoConnectEnabled,
+      }}
+    >
       {children}
     </WalletContext.Provider>
   );
-}; 
+};

@@ -23,10 +23,22 @@ import { useWallet } from '../../context/WalletContext';
 import { TokenCard, TokenData } from '../common/TokenCard';
 import { TokenModal } from '../common/TokenModal';
 import { processTokens, filterNFTs, filterFungibleTokens, groupByCollection } from '../../utils/tokenProcessing';
+import { HowItWorks } from '../onboarding/HowItWorks';
+import { HowToGetErg } from '../onboarding/HowToGetErg';
+import { AddressCard } from '../onboarding/AddressCard';
 
 export const WalletDashboard: React.FC = () => {
-  const { walletData, connectToWallet } = useWallet();
+  const { walletData, connectToWallet, ergoAddress, source } = useWallet();
   const { isConnected, ergBalance, tokens: rawTokens, walletStatus } = walletData;
+  const hasZeroBalance = isConnected && Number(ergBalance) === 0 && rawTokens.length === 0;
+  const sourceLabel =
+    source === 'dynamic-nautilus'
+      ? 'Nautilus'
+      : source === 'vault'
+      ? 'Email + passkey'
+      : source === 'nautilus-direct'
+      ? 'Nautilus (direct)'
+      : null;
   const { colorMode } = useColorMode();
   const [selectedToken, setSelectedToken] = useState<TokenData | null>(null);
   const [processedTokens, setProcessedTokens] = useState<TokenData[]>([]);
@@ -71,33 +83,45 @@ export const WalletDashboard: React.FC = () => {
 
   if (!isConnected) {
     return (
-      <VStack spacing={6} p={10} align="center">
-        <Heading 
-          as="h2" 
-          size="2xl" 
-          bgGradient="linear(to-r, ergnome.blue, ergnome.purple)" 
-          bgClip="text"
-        >
-          Ergo Wallet Explorer
-        </Heading>
-        <Text fontSize="xl" color={colorMode === 'light' ? 'ergnome.text.light' : 'ergnome.text.dark'} textAlign="center" maxW="600px">
-          Connect your Nautilus wallet to see your ERG balance and NFTs!
-        </Text>
-        <Button 
-          size="lg" 
-          leftIcon={<Icon as={FaWallet} />}
-          onClick={connectToWallet}
-          bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
-          color="white"
-          _hover={{
-            bgGradient: "linear(to-r, ergnome.purple, ergnome.blue)",
-          }}
-          px={8}
-          py={6}
-          fontSize="xl"
-        >
-          Connect Wallet
-        </Button>
+      <VStack spacing={8} p={10} align="center" maxW="1000px" mx="auto">
+        <VStack spacing={4} align="center">
+          <Heading
+            as="h2"
+            size="2xl"
+            bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
+            bgClip="text"
+            textAlign="center"
+          >
+            Welcome to Ergo
+          </Heading>
+          <Text
+            fontSize="lg"
+            color={colorMode === 'light' ? 'ergnome.text.light' : 'ergnome.text.dark'}
+            textAlign="center"
+            maxW="650px"
+          >
+            One sign-in gets you a self-custodial Ergo wallet, an NFT gallery,
+            and on-chain Send-ERG. No browser extension required (but
+            Nautilus works too if you already have it).
+          </Text>
+          <Button
+            size="lg"
+            leftIcon={<Icon as={FaWallet} />}
+            onClick={connectToWallet}
+            bgGradient="linear(to-r, ergnome.blue, ergnome.purple)"
+            color="white"
+            _hover={{
+              bgGradient: "linear(to-r, ergnome.purple, ergnome.blue)",
+            }}
+            px={8}
+            py={6}
+            fontSize="xl"
+          >
+            Sign in with Dynamic
+          </Button>
+        </VStack>
+
+        <HowItWorks />
       </VStack>
     );
   }
@@ -127,7 +151,11 @@ export const WalletDashboard: React.FC = () => {
           boxShadow="0 4px 20px rgba(65, 157, 217, 0.2)"
         >
           <VStack spacing={4} align="flex-start">
-            <Heading size="lg" color={colorMode === 'light' ? 'ergnome.blueAccent.light' : 'ergnome.blue'}>Wallet Overview</Heading>
+            <HStack w="100%" justify="space-between">
+              <Heading size="lg" color={colorMode === 'light' ? 'ergnome.blueAccent.light' : 'ergnome.blue'}>Wallet Overview</Heading>
+              {sourceLabel && <Badge colorScheme="blue">{sourceLabel}</Badge>}
+            </HStack>
+            {ergoAddress && <AddressCard address={ergoAddress} />}
             <Flex justify="space-between" w="100%">
               <Text fontSize="lg">Status:</Text>
               <Text fontSize="lg" color={colorMode === 'light' ? 'ergnome.greenAccent.light' : 'ergnome.green'} fontWeight="bold">{walletStatus}</Text>
@@ -146,6 +174,8 @@ export const WalletDashboard: React.FC = () => {
             </Flex>
           </VStack>
         </Box>
+
+        {hasZeroBalance && ergoAddress && <HowToGetErg address={ergoAddress} />}
 
         {processedTokens.length > 0 && (
           <Box 

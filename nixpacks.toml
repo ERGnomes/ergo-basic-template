@@ -1,0 +1,22 @@
+# Nixpacks build configuration for Railway.
+#
+# - Pin Node 20 (CRA 5 + the Dynamic SDK dep tree both work on 20.x).
+# - Use --legacy-peer-deps because react-scripts 5 has stale peer ranges
+#   for several Chakra/Dynamic packages.
+# - Force CI=false during the build so CRA does not promote webpack
+#   warnings (e.g. WalletConnect's "Critical dependency: the request of
+#   a dependency is an expression") into hard errors.
+
+providers = ["node"]
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-9_x"]
+
+[phases.install]
+cmds = ["npm install --legacy-peer-deps --no-audit --no-fund"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run serve"
