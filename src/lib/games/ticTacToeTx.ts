@@ -29,12 +29,10 @@ import {
 import {
   applyMove,
   Board,
-  currentSymbol,
   EMPTY_BOARD,
   isXTurn,
   winnerOf,
   CELL_X,
-  CELL_O,
   CELL_EMPTY,
 } from "./ticTacToeLogic";
 import {
@@ -45,6 +43,35 @@ import {
 } from "./ticTacToeContract";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
+
+/**
+ * Explorer v1 returns registers as
+ *   { R4: { serializedValue, sigmaType, renderedValue }, ... }
+ * but Fleet's TransactionBuilder.from() and sigma-rust's
+ * ErgoBoxes.from_boxes_json() both expect flat hex strings:
+ *   { R4: "0e09...", ... }
+ * Without this flattening, Fleet throws
+ * `Expected an object of type 'string', got 'object'`
+ * on any box that has registers (our game box does — P2PK boxes don't,
+ * which is why the Send-ERG path doesn't hit it).
+ */
+const normalizeExplorerBox = (box: any): any => {
+  const regs = box?.additionalRegisters;
+  if (!regs || typeof regs !== "object") return box;
+  const flatRegs: Record<string, string> = {};
+  for (const [k, v] of Object.entries(regs)) {
+    if (typeof v === "string") {
+      flatRegs[k] = v;
+    } else if (v && typeof v === "object") {
+      const ser = (v as any).serializedValue;
+      if (typeof ser === "string") flatRegs[k] = ser;
+    }
+  }
+  return { ...box, additionalRegisters: flatRegs };
+};
+
+const normalizeExplorerBoxes = (boxes: any[]): any[] =>
+  boxes.map(normalizeExplorerBox);
 
 const fetchUnspentBoxes = async (address: string): Promise<any[]> => {
   const res = await fetch(
@@ -79,7 +106,7 @@ export const buildCreateGameTx = async (params: {
     throw new Error("Wager must be > 0 nanoERG.");
   }
 
-  const inputs = await fetchUnspentBoxes(creatorAddress);
+  const inputs = normalizeExplorerBoxes(await fetchUnspentBoxes(creatorAddress));
   if (inputs.length === 0) throw new Error("No unspent boxes at your address.");
   const height = await fetchCurrentHeight();
   const contractAddress = getGameP2SAddress();
@@ -129,8 +156,7 @@ export const buildJoinGameTx = async (params: {
   joinerAddress: string;
   joinerPubKeyHex: string;
 }) => {
-  const { currentGameBox, currentGameState, joinerAddress, joinerPubKeyHex } =
-    params;
+  const { currentGameState, joinerAddress, joinerPubKeyHex } = params;
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("This game has already been joined.");
   }
@@ -138,7 +164,8 @@ export const buildJoinGameTx = async (params: {
     throw new Error("You can't join your own game.");
   }
 
-  const funding = await fetchUnspentBoxes(joinerAddress);
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(joinerAddress));
   if (funding.length === 0) {
     throw new Error("No unspent boxes at your address to fund the join.");
   }
@@ -191,8 +218,8 @@ export const buildMoveTx = async (params: {
   moverPubKeyHex: string;
   cell: number; // 0..8
 }) => {
-  const { currentGameBox, currentGameState, moverAddress, moverPubKeyHex, cell } =
-    params;
+  const { currentGameState, moverAddress, moverPubKeyHex, cell } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game hasn't been joined yet.");
@@ -219,7 +246,7 @@ export const buildMoveTx = async (params: {
 
   // We may need extra funding to pay the fee; fetch the mover's other
   // UTXOs to chip in.
-  const funding = await fetchUnspentBoxes(moverAddress);
+  const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(moverAddress));
   const height = await fetchCurrentHeight();
 
   const out = new OutputBuilder(
@@ -256,8 +283,8 @@ export const buildCancelGameTx = async (params: {
   creatorAddress: string;
   creatorPubKeyHex: string;
 }) => {
-  const { currentGameBox, currentGameState, creatorAddress, creatorPubKeyHex } =
-    params;
+  const { currentGameState, creatorAddress, creatorPubKeyHex } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("Game is already joined; cancel is no longer allowed.");
   }
@@ -296,8 +323,8 @@ export const buildClaimWinTx = async (params: {
   winnerAddress: string;
   winnerPubKeyHex: string;
 }) => {
-  const { currentGameBox, currentGameState, winnerAddress, winnerPubKeyHex } =
-    params;
+  const { currentGameState, winnerAddress, winnerPubKeyHex } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
   const winner = winnerOf(currentGameState.board);
   if (winner === null) {
     throw new Error("No winner yet.");

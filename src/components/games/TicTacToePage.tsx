@@ -64,16 +64,6 @@ import {
 import TicTacToeBoard from "./TicTacToeBoard";
 import TicTacToePractice from "./TicTacToePractice";
 
-// WebAuthn PRF is required by the email-vault path. Firefox stable
-// doesn't ship it yet (April 2026). We detect Firefox synchronously
-// via the UA so we can show a banner without waiting on a WebAuthn
-// round-trip that would just fail later.
-const isFirefox = (): boolean => {
-  if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent || "";
-  return /firefox\//i.test(ua) && !/seamonkey\//i.test(ua);
-};
-
 const NANO_PER_ERG = 1_000_000_000;
 const MIN_WAGER_ERG = 0.01;
 const DEFAULT_WAGER_ERG = 0.1;
@@ -429,10 +419,13 @@ export const TicTacToePage: React.FC = () => {
   // Render.
   // ------------------------------------------------------------------
 
-  const firefox = isFirefox();
-
   // Always-on shell: header + practice board + warnings. The on-chain
   // lobby only layers on top once the user is connected.
+  //
+  // Note: we don't UA-sniff for Firefox any more — modern Firefox has
+  // shipped WebAuthn PRF, and if a specific browser/authenticator
+  // combination doesn't support it, the actual PRF call in the vault
+  // flow will error with a descriptive message that the UI surfaces.
   const pageHeader = (
     <>
       <Stack spacing={1}>
@@ -459,23 +452,6 @@ export const TicTacToePage: React.FC = () => {
           </AlertDescription>
         </Stack>
       </Alert>
-
-      {firefox && (
-        <Alert status="warning" borderRadius="md">
-          <AlertIcon />
-          <Stack spacing={1}>
-            <AlertTitle>Firefox can't use the email-vault path</AlertTitle>
-            <AlertDescription fontSize="sm">
-              Our passkey vault needs the WebAuthn PRF extension, which
-              Firefox stable doesn't ship yet. You can still play an
-              on-chain game in Firefox if you connect Nautilus (the
-              extension → Sign in with Dynamic → Nautilus). To use the
-              email-login path, open this page in Chrome, Edge, or
-              Safari 18+. Practice mode below works in any browser.
-            </AlertDescription>
-          </Stack>
-        </Alert>
-      )}
 
       <TicTacToePractice />
     </>
