@@ -681,6 +681,17 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
               />
             </Flex>
             <HStack flexWrap="wrap" spacing={2}>
+              {activeGame.phase === "drawn" && (
+                <Alert status="info" borderRadius="md" fontSize="sm">
+                  <AlertIcon />
+                  <AlertDescription>
+                    Meta draw: both players must co-sign a spend of this box (same as
+                    classic tic-tac-toe). A dedicated &quot;draw payout&quot; builder is not
+                    wired in this UI yet — use a wallet that can co-sign the raw
+                    transaction or extend the app.
+                  </AlertDescription>
+                </Alert>
+              )}
               {activeGame.phase === "open" && myPubKey === activeGame.state.p1PubKeyHex && (
                 <Button size="sm" variant="outline" onClick={handleCancel} isDisabled={busy}>
                   Cancel open game
