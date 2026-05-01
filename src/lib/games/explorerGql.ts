@@ -14,12 +14,16 @@ export interface GqlExplorerBoxLike {
   additionalRegisters?: Record<string, any>;
   spentTransactionId?: string | null;
   settlementHeight?: number;
+  /** Creation tx id + output index — required for Fleet `ErgoBoxes.from_boxes_json`. */
   transactionId?: string;
+  index?: number;
 }
 
 export interface GqlBoxRow {
   boxId: string;
   value: string;
+  transactionId: string | null;
+  index: number | null;
   settlementHeight: number | null;
   spentBy: { transactionId: string } | null;
   additionalRegisters: Record<string, unknown> | null;
@@ -64,6 +68,8 @@ export const gqlRegistersToExplorerShape = (
 export const gqlBoxToExplorerLike = (b: GqlBoxRow): GqlExplorerBoxLike => ({
   boxId: b.boxId,
   value: b.value,
+  transactionId: b.transactionId ?? undefined,
+  index: typeof b.index === "number" ? b.index : undefined,
   spentTransactionId: b.spentBy?.transactionId ?? null,
   settlementHeight: typeof b.settlementHeight === "number" ? b.settlementHeight : undefined,
   additionalRegisters: gqlRegistersToExplorerShape(b.additionalRegisters || undefined),
@@ -72,6 +78,8 @@ export const gqlBoxToExplorerLike = (b: GqlBoxRow): GqlExplorerBoxLike => ({
 const BOX_FIELDS = `
   boxId
   value
+  transactionId
+  index
   settlementHeight
   spentBy { transactionId }
   additionalRegisters
