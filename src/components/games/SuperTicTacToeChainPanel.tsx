@@ -44,6 +44,7 @@ import {
   SuperGameHistorySnapshot,
   fetchAllSuperGames,
   fetchRecentSuperGameHistory,
+  findCurrentSuperBoxForGame,
 } from "../../lib/games/superTicTacToeDiscovery";
 import {
   getSuperGameP2SAddress,
@@ -1202,29 +1203,98 @@ interface SuperXoxoWatchModalProps {
   onClose: () => void;
 }
 
+const WATCH_POLL_MS = 4000;
+
 const SuperXoxoWatchModal: React.FC<SuperXoxoWatchModalProps> = ({ game, onClose }) => {
+  const [snap, setSnap] = useState<DiscoveredSuperGame | null>(null);
+  const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (game) {
+      setSnap(game);
+      setLastSynced(null);
+      setSyncError(null);
+    } else {
+      setSnap(null);
+    }
+  }, [game]);
+
+  useEffect(() => {
+    if (!game) return undefined;
+    const { p1PubKeyHex, p2PubKeyHex, wagerNanoErg } = game.state;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const latest = await findCurrentSuperBoxForGame(
+          p1PubKeyHex,
+          p2PubKeyHex,
+          wagerNanoErg
+        );
+        if (cancelled) return;
+        setSyncError(null);
+        setSnap((prev) => (latest ? latest : prev ?? game));
+        setLastSynced(Date.now());
+      } catch (e: any) {
+        if (!cancelled) {
+          setSyncError(e?.message || String(e));
+        }
+      }
+    };
+
+    void poll();
+    const id = window.setInterval(() => void poll(), WATCH_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [game]);
+
   if (!game) return null;
-  const g = superChainStateToGame(game.state);
+
+  const view = snap ?? game;
+  const g = superChainStateToGame(view.state);
   const st = superStatusOf(g);
-  const addrs = getSuperPlayerAddresses(game.state);
+  const addrs = getSuperPlayerAddresses(view.state);
 
   return (
     <Modal isOpen onClose={onClose} size="xl">
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>Watch game</ModalHeader>
+        <ModalHeader>
+          <HStack justify="space-between" pr={8}>
+            <Text>Watch game</Text>
+            <Badge colorScheme="cyan" variant="subtle">
+              Live · {WATCH_POLL_MS / 1000}s refresh
+            </Badge>
+          </HStack>
+        </ModalHeader>
         <ModalCloseButton />
         <ModalBody>
           <Stack spacing={4}>
+            {syncError && (
+              <Alert status="warning" borderRadius="md" size="sm">
+                <AlertIcon />
+                <AlertDescription fontSize="xs">
+                  Could not refresh: {syncError}
+                </AlertDescription>
+              </Alert>
+            )}
             <HStack flexWrap="wrap" gap={2}>
-              <Badge>{outcomeLabel(game)}</Badge>
+              <Badge>{outcomeLabel(view)}</Badge>
               <Text fontSize="xs" opacity={0.7}>
-                Pot {formatErg(BigInt(game.box.value))} ERG · wager{" "}
-                {formatErg(game.state.wagerNanoErg)} each
+                Pot {formatErg(BigInt(view.box.value))} ERG · wager{" "}
+                {formatErg(view.state.wagerNanoErg)} each
               </Text>
             </HStack>
+            {lastSynced !== null && (
+              <Text fontSize="xs" opacity={0.55}>
+                Last chain sync: {new Date(lastSynced).toLocaleTimeString()}
+              </Text>
+            )}
             <Text fontSize="sm" opacity={0.85}>
-              {prizeSummary(game)}
+              {prizeSummary(view)}
             </Text>
             <Text fontSize="xs">
               <strong>X:</strong> <Code fontSize="xs">{truncAddr(addrs.p1)}</Code>
@@ -1235,14 +1305,19 @@ const SuperXoxoWatchModal: React.FC<SuperXoxoWatchModalProps> = ({ game, onClose
             <Flex justify="center" overflowX="auto">
               <SuperTicTacToeBoard game={g} readOnly />
             </Flex>
+            <Alert status="info" borderRadius="md" fontSize="sm">
+              <AlertIcon />
+              <AlertDescription>
+                This view re-fetches the contract UTXO for this match every {WATCH_POLL_MS / 1000} seconds
+                (same <Code fontSize="xs">p1 + p2 + wager</Code> identity as on-chain play). After each move
+                confirms (~1–3 minutes), the board and pot update automatically. If the game was claimed or
+                fully settled, the last on-chain snapshot stays visible until you close.
+              </AlertDescription>
+            </Alert>
             {st.kind === "ongoing" && (
-              <Alert status="info" borderRadius="md" fontSize="sm">
-                <AlertIcon />
-                <AlertDescription>
-                  Read-only view. Connect as a player and use <strong>Play</strong> in the
-                  table to move.
-                </AlertDescription>
-              </Alert>
+              <Text fontSize="xs" opacity={0.75}>
+                Read-only. To move, connect as a player and use <strong>Play</strong> in the table.
+              </Text>
             )}
           </Stack>
         </ModalBody>
