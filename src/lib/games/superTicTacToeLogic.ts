@@ -12,7 +12,6 @@ import {
   type Board,
   type Cell,
   type GameStatus,
-  applyMove,
   isLegalMove,
   nonEmptyCount,
   winnerOf,
@@ -141,7 +140,14 @@ export const applySuperMove = (
     throw new Error("illegal super tic-tac-toe move");
   }
   const sub = game.boards[subIndex];
-  const newSub = applyMove(sub, cellIndex);
+  /** Global alternation: same move index as classic 9×9, not per-mini-board `applyMove`. */
+  const sym = currentSuperSymbol(game);
+  const nextCells = [...sub] as unknown as Cell[];
+  if (nextCells[cellIndex] !== CELL_EMPTY) {
+    throw new Error("illegal super tic-tac-toe move");
+  }
+  nextCells[cellIndex] = sym;
+  const newSub = nextCells as unknown as Board;
   const boards = game.boards.map((b, i) => (i === subIndex ? newSub : b)) as unknown as SuperBoard;
 
   const targetNext = cellIndex;
