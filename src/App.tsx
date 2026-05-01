@@ -11,6 +11,7 @@ import RosenBridgeTest from './components/RosenBridgeTest';
 import { DynamicProvider } from './lib/DynamicProvider';
 import { ErgoWallet } from './components/ErgoWallet';
 import { TicTacToePage } from './components/games/TicTacToePage';
+import { SuperTicTacToePage } from './components/games/SuperTicTacToePage';
 import { dynamicAuthRoutesEnabled } from './lib/appEnv';
 
 export const App = () => {
@@ -23,6 +24,7 @@ export const App = () => {
       ? [{ label: 'Dynamic Login', to: '/dynamic' as const }]
       : []),
     { label: 'Tic-Tac-Toe', to: '/games/tic-tac-toe' },
+    { label: 'xoxo (Super)', to: '/games/xoxo' },
     { label: 'NFT Gallery', to: '/nft-gallery' },
     { label: 'Metadata Test', to: '/rosen-test' },
   ];
@@ -46,6 +48,7 @@ export const App = () => {
                   <Route path="/dynamic" element={<Navigate to="/" replace />} />
                 )}
                 <Route path="/games/tic-tac-toe" element={<TicTacToePage />} />
+                <Route path="/games/xoxo" element={<SuperTicTacToePage />} />
                 <Route path="/nft-gallery" element={<NFTGalleryPage />} />
                 <Route path="/rosen-test" element={<RosenBridgeTest />} />
               </Routes>
