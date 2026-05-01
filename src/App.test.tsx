@@ -42,6 +42,10 @@ jest.mock("./components/games/TicTacToePage", () => ({
   TicTacToePage: () => <div data-testid="tic-tac-toe-mock" />,
 }))
 
+jest.mock("./components/games/SuperTicTacToePage", () => ({
+  SuperTicTacToePage: () => <div data-testid="super-tic-tac-toe-mock" />,
+}))
+
 const { App } = require("./App")
 
 test("renders app shell with dashboard route", () => {

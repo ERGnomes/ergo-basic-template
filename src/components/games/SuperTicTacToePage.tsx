@@ -6,6 +6,7 @@ import {
   Badge,
   Box,
   Button,
+  Divider,
   Flex,
   HStack,
   Heading,
@@ -13,6 +14,7 @@ import {
   Text,
   useColorMode,
 } from "@chakra-ui/react";
+import { useWallet } from "../../context/WalletContext";
 import {
   applySuperMove,
   initialSuperGame,
@@ -21,6 +23,7 @@ import {
   superStatusOf,
 } from "../../lib/games/superTicTacToeLogic";
 import SuperTicTacToeBoard from "./SuperTicTacToeBoard";
+import SuperTicTacToeChainPanel from "./SuperTicTacToeChainPanel";
 
 /**
  * Ultimate (Super) Tic Tac Toe — local two-player, same browser.
@@ -28,6 +31,7 @@ import SuperTicTacToeBoard from "./SuperTicTacToeBoard";
  */
 export const SuperTicTacToePage: React.FC = () => {
   const { colorMode } = useColorMode();
+  const { ergoAddress } = useWallet();
   const [game, setGame] = useState<SuperGame>(() => initialSuperGame());
 
   const status = superStatusOf(game);
@@ -65,7 +69,7 @@ export const SuperTicTacToePage: React.FC = () => {
       : `You must play in mini-board ${game.constraintSub + 1} (highlighted).`;
 
   return (
-    <Box p={{ base: 4, md: 6 }} maxW="720px" mx="auto">
+    <Box p={{ base: 4, md: 6 }} maxW="960px" mx="auto">
       <Stack spacing={5}>
         <Stack spacing={1}>
           <Heading size="lg">xoxo · Super Tic Tac Toe</Heading>
@@ -91,9 +95,10 @@ export const SuperTicTacToePage: React.FC = () => {
             <Alert status="info" borderRadius="md" fontSize="sm">
               <AlertIcon />
               <AlertDescription>
-                {constraintHint} This game is offline only (no wallet or chain),
-                like practice mode on the classic page — but with nested boards
-                and stricter rules.
+                {constraintHint} Two players at this browser, no wallet. For
+                wagered games on Ergo, use the on-chain section below (same flow as
+                classic tic-tac-toe: create, join, one tx per move, claim when you
+                win the meta board).
               </AlertDescription>
             </Alert>
 
@@ -108,6 +113,23 @@ export const SuperTicTacToePage: React.FC = () => {
             </HStack>
           </Stack>
         </Box>
+
+        <Divider />
+
+        <Stack spacing={3}>
+          <Heading size="md">On-chain xoxo</Heading>
+          {ergoAddress ? (
+            <SuperTicTacToeChainPanel />
+          ) : (
+            <Alert status="info" borderRadius="md" fontSize="sm">
+              <AlertIcon />
+              <AlertDescription>
+                Connect a wallet from the dashboard to create or join real Ultimate
+                games (separate contract from standard 3×3 tic-tac-toe).
+              </AlertDescription>
+            </Alert>
+          )}
+        </Stack>
       </Stack>
     </Box>
   );
