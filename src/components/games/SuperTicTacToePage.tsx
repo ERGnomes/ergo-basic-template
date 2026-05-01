@@ -33,9 +33,12 @@ export const SuperTicTacToePage: React.FC = () => {
   const status = superStatusOf(game);
 
   const onPlay = (subIndex: number, cellIndex: number) => {
-    if (!isLegalSuperMove(game, subIndex, cellIndex)) return;
-    if (status.kind === "won" || status.kind === "drawn") return;
-    setGame(applySuperMove(game, subIndex, cellIndex));
+    setGame((prev) => {
+      if (!isLegalSuperMove(prev, subIndex, cellIndex)) return prev;
+      const s = superStatusOf(prev);
+      if (s.kind === "won" || s.kind === "drawn") return prev;
+      return applySuperMove(prev, subIndex, cellIndex);
+    });
   };
 
   const reset = () => setGame(initialSuperGame());
