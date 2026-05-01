@@ -41,9 +41,12 @@ export const TicTacToePractice: React.FC = () => {
   const status = statusOf(board, false);
 
   const onPlay = (cell: number) => {
-    if (!isLegalMove(board, cell)) return;
-    if (status.kind === "won" || status.kind === "drawn") return;
-    setBoard(applyMove(board, cell));
+    setBoard((prev) => {
+      if (!isLegalMove(prev, cell)) return prev;
+      const st = statusOf(prev, false);
+      if (st.kind === "won" || st.kind === "drawn") return prev;
+      return applyMove(prev, cell);
+    });
   };
 
   const reset = () => setBoard(EMPTY_BOARD);
