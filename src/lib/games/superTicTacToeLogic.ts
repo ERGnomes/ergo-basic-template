@@ -18,6 +18,9 @@ import {
   winnerOf,
 } from "./ticTacToeLogic";
 
+/** Super games are never in the contract-style "open" state. */
+export type SuperGameStatus = Exclude<GameStatus, { kind: "open" }>;
+
 /** Meta cell filled but no winner (mini-board full). */
 export const META_DRAW = 3 as const;
 
@@ -103,7 +106,7 @@ export const superWinner = (boards: SuperBoard): typeof CELL_X | typeof CELL_O |
 export const superMetaFull = (boards: SuperBoard): boolean =>
   boards.every((b) => metaOutcomeOfSub(b) !== CELL_EMPTY);
 
-export const superStatusOf = (game: SuperGame): GameStatus => {
+export const superStatusOf = (game: SuperGame): SuperGameStatus => {
   const w = superWinner(game.boards);
   if (w === CELL_X) return { kind: "won", winner: "X" };
   if (w === CELL_O) return { kind: "won", winner: "O" };

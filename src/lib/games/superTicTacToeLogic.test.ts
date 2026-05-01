@@ -3,12 +3,19 @@ import {
   applySuperMove,
   initialSuperGame,
   isLegalSuperMove,
-  metaOutcomeOfSub,
+  type SuperBoard,
   superMetaFull,
   superStatusOf,
   superWinner,
 } from "./superTicTacToeLogic";
-import { CELL_EMPTY, CELL_O, CELL_X, EMPTY_BOARD } from "./ticTacToeLogic";
+import {
+  CELL_EMPTY,
+  CELL_O,
+  CELL_X,
+  EMPTY_BOARD,
+  type Board,
+  type Cell,
+} from "./ticTacToeLogic";
 
 describe("superTicTacToeLogic", () => {
   it("starts with X to move and no constraint after first move sends to sub", () => {
@@ -53,20 +60,24 @@ describe("superTicTacToeLogic", () => {
 
   it("detects super win on meta line", () => {
     // Simplified: manually impossible without many moves — use three subs each won by X in a row
-    const boards = EMPTY_SUPER_BOARD.map((b) => [...b]) as unknown as typeof EMPTY_SUPER_BOARD;
+    const boards = [...EMPTY_SUPER_BOARD] as unknown as Board[];
     // Win sub 0 for X: 0,1,2 top row
-    const winLine = (cells: [number, number, number]) => {
-      const b = [...EMPTY_BOARD] as number[];
-      b[cells[0]] = CELL_X;
-      b[cells[1]] = CELL_X;
-      b[cells[2]] = CELL_X;
-      return b as (typeof EMPTY_BOARD)[number];
+    const winLine = (cells: [number, number, number]): Board => {
+      const next = [...EMPTY_BOARD] as unknown as Cell[];
+      next[cells[0]] = CELL_X;
+      next[cells[1]] = CELL_X;
+      next[cells[2]] = CELL_X;
+      return next as unknown as Board;
     };
     boards[0] = winLine([0, 1, 2]);
     boards[1] = winLine([3, 4, 5]);
     boards[2] = winLine([6, 7, 8]);
-    const game = { boards, constraintSub: null as number | null };
-    expect(superWinner(boards)).toBe(CELL_X);
+    const boardsTuple = boards as unknown as SuperBoard;
+    const game = {
+      boards: boardsTuple,
+      constraintSub: null as number | null,
+    };
+    expect(superWinner(boardsTuple)).toBe(CELL_X);
     expect(superStatusOf(game)).toEqual({ kind: "won", winner: "X" });
   });
 
@@ -83,7 +94,7 @@ describe("superTicTacToeLogic", () => {
       CELL_X,
       CELL_O,
     ] as unknown as (typeof EMPTY_BOARD)[number];
-    const boards = EMPTY_SUPER_BOARD.map(() => drawSub);
+    const boards = EMPTY_SUPER_BOARD.map(() => drawSub) as unknown as SuperBoard;
     expect(superMetaFull(boards)).toBe(true);
     expect(superWinner(boards)).toBeNull();
     expect(superStatusOf({ boards, constraintSub: null })).toEqual({ kind: "drawn" });
