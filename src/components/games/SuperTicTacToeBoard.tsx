@@ -7,15 +7,17 @@ import {
   useColorMode,
 } from "@chakra-ui/react";
 import {
-  CELL_EMPTY,
-  CELL_O,
-  CELL_X,
   META_DRAW,
   type SuperGame,
   isLegalSuperMove,
   metaOutcomeOfSub,
 } from "../../lib/games/superTicTacToeLogic";
-import { isLegalMove } from "../../lib/games/ticTacToeLogic";
+import {
+  CELL_EMPTY,
+  CELL_O,
+  CELL_X,
+  isLegalMove,
+} from "../../lib/games/ticTacToeLogic";
 
 interface Props {
   game: SuperGame;
