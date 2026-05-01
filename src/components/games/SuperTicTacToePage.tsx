@@ -48,9 +48,12 @@ export const SuperTicTacToePage: React.FC = () => {
   } else if (status.kind === "drawn") {
     statusLabel = "Draw";
     statusColor = "gray";
-  } else {
+  } else if (status.kind === "ongoing") {
     statusLabel = `Turn: ${status.turn}`;
     statusColor = "purple";
+  } else {
+    statusLabel = "Ready";
+    statusColor = "blue";
   }
 
   const constraintHint =
