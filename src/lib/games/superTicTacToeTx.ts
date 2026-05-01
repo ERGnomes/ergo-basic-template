@@ -350,6 +350,65 @@ export const buildSuperClaimWinTx = async (params: {
   return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
 };
 
+/**
+ * Meta draw: both players must co-sign. Split (value − fee) evenly between p1 and p2.
+ */
+export const buildSuperDrawSplitTx = async (params: {
+  currentGameBox: any;
+  currentGameState: SuperChainGameState;
+  p1Address: string;
+  p2Address: string;
+  signerPubKeyHex: string;
+}) => {
+  const { currentGameState, p1Address, p2Address, signerPubKeyHex } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
+    throw new Error("Game is not joined.");
+  }
+  if (superWinner(currentGameState.boards) !== null) {
+    throw new Error("There is a meta winner — use claim instead.");
+  }
+  if (!superMetaFull(currentGameState.boards)) {
+    throw new Error("Meta board is not full — not a draw yet.");
+  }
+  if (
+    signerPubKeyHex !== currentGameState.p1PubKeyHex &&
+    signerPubKeyHex !== currentGameState.p2PubKeyHex
+  ) {
+    throw new Error("Only a participant can build the draw split transaction.");
+  }
+
+  const height = await fetchCurrentHeight();
+  const gameValue = BigInt(currentGameBox.value);
+  const fee = RECOMMENDED_MIN_FEE_VALUE;
+  const potAfterFee = gameValue - fee;
+  if (potAfterFee <= BigInt(0)) {
+    throw new Error("Box value too low to pay network fee and split.");
+  }
+  const half = potAfterFee / BigInt(2);
+  const rem = potAfterFee % BigInt(2);
+  const toP1 = half + rem;
+  const toP2 = half;
+  const minPer = SAFE_MIN_BOX_VALUE;
+  if (toP1 < minPer || toP2 < minPer) {
+    throw new Error("Pot too small to split into two valid outputs after fee.");
+  }
+
+  const out1 = new OutputBuilder(toP1, ErgoAddress.fromBase58(p1Address));
+  const out2 = new OutputBuilder(toP2, ErgoAddress.fromBase58(p2Address));
+
+  const unsigned = new TransactionBuilder(height)
+    .from([currentGameBox])
+    .to(out1)
+    .to(out2)
+    .payFee(fee)
+    .sendChangeTo(p1Address)
+    .build()
+    .toEIP12Object();
+
+  return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
+};
+
 export const getSuperPlayerAddresses = (state: SuperChainGameState) => ({
   p1: pubkeyToMainnetAddress(state.p1PubKeyHex),
   p2:

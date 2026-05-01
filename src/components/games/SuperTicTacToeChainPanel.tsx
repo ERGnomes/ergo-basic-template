@@ -12,6 +12,13 @@ import {
   Flex,
   Heading,
   HStack,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   NumberDecrementStepper,
   NumberIncrementStepper,
   NumberInput,
@@ -45,16 +52,19 @@ import {
 import {
   applySuperMove,
   isLegalSuperMove,
+  superMetaFull,
   superStatusOf,
   superWinner,
   totalMoves,
   type SuperBoard,
   type SuperGame,
 } from "../../lib/games/superTicTacToeLogic";
+import { CELL_O, CELL_X } from "../../lib/games/ticTacToeLogic";
 import {
   buildSuperCancelGameTx,
   buildSuperClaimWinTx,
   buildSuperCreateGameTx,
+  buildSuperDrawSplitTx,
   buildSuperJoinGameTx,
   buildSuperMoveTx,
   getSuperPlayerAddresses,
@@ -114,6 +124,9 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
   const [wagerErg, setWagerErg] = useState(DEFAULT_WAGER_ERG);
   const [myPubKey, setMyPubKey] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingSuperTx[]>(() => getPendingSuperTxs());
+  const [historyInspect, setHistoryInspect] = useState<SuperGameHistorySnapshot | null>(
+    null
+  );
 
   useEffect(() => {
     const unsub = subscribePendingSuper(() => setPending(getPendingSuperTxs()));
@@ -498,7 +511,11 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
           spentBoxId: activeGame.box.boxId,
           predicted: null,
           predictedPhase: "spent",
-          follow: null,
+          follow: {
+            p1PubKeyHex: activeGame.state.p1PubKeyHex,
+            p2PubKeyHex: activeGame.state.p1PubKeyHex,
+            wagerNanoErg: activeGame.state.wagerNanoErg.toString(),
+          },
           description: "Cancelling open xoxo game",
         });
         if (ok) {
@@ -517,23 +534,28 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     });
   };
 
-  const handleClaimWin = async () => {
-    if (!activeGame || !ergoAddress || !myPubKey) return;
+  const handleClaimWin = async (gameOverride?: DiscoveredSuperGame | null) => {
+    const g = gameOverride ?? activeGame;
+    if (!g || !ergoAddress || !myPubKey) return;
     await withBusy("Building claim transaction…", async () => {
       try {
         const tx = await buildSuperClaimWinTx({
-          currentGameBox: activeGame.box,
-          currentGameState: activeGame.state,
+          currentGameBox: g.box,
+          currentGameState: g.state,
           winnerAddress: ergoAddress,
           winnerPubKeyHex: myPubKey,
         });
         const ok = await signAndSubmitTx(tx, {
           kind: "claim",
-          spentBoxId: activeGame.box.boxId,
+          spentBoxId: g.box.boxId,
           predicted: null,
           predictedPhase: "spent",
-          follow: null,
-          description: `Claiming xoxo pot ${formatErg(BigInt(activeGame.box.value))} ERG`,
+          follow: {
+            p1PubKeyHex: g.state.p1PubKeyHex,
+            p2PubKeyHex: g.state.p2PubKeyHex,
+            wagerNanoErg: g.state.wagerNanoErg.toString(),
+          },
+          description: `Claiming xoxo pot ${formatErg(BigInt(g.box.value))} ERG`,
         });
         if (ok) {
           setTimeout(refreshGames, 3000);
@@ -551,6 +573,58 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     });
   };
 
+  const handleDrawSplit = async (gameOverride?: DiscoveredSuperGame | null) => {
+    const g = gameOverride ?? activeGame;
+    if (!g || !ergoAddress || !myPubKey) return;
+    await withBusy("Building draw split transaction…", async () => {
+      try {
+        const addrs = getSuperPlayerAddresses(g.state);
+        if (!addrs.p2) {
+          toast({ title: "Opponent address unknown", status: "error" });
+          return;
+        }
+        const tx = await buildSuperDrawSplitTx({
+          currentGameBox: g.box,
+          currentGameState: g.state,
+          p1Address: addrs.p1,
+          p2Address: addrs.p2,
+          signerPubKeyHex: myPubKey,
+        });
+        const ok = await signAndSubmitTx(tx, {
+          kind: "draw",
+          spentBoxId: g.box.boxId,
+          predicted: null,
+          predictedPhase: "spent",
+          follow: {
+            p1PubKeyHex: g.state.p1PubKeyHex,
+            p2PubKeyHex: g.state.p2PubKeyHex,
+            wagerNanoErg: g.state.wagerNanoErg.toString(),
+          },
+          description: "xoxo draw — split pot (needs both signatures)",
+        });
+        if (ok) {
+          toast({
+            title: "Your signature is attached",
+            description:
+              "Your opponent must sign the same draw split in Nautilus to merge both halves.",
+            status: "info",
+            duration: 12000,
+            isClosable: true,
+          });
+          setTimeout(refreshGames, 3000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't build draw transaction",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 8000,
+          isClosable: true,
+        });
+      }
+    });
+  };
+
   const pendingBoxIds = useMemo(
     () => new Set(pending.map((p) => p.spentBoxId).filter(Boolean) as string[]),
     [pending]
@@ -561,6 +635,17 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     : null;
   const chainStatus = displayGame ? superStatusOf(displayGame) : null;
   const metaW = activeGame ? superWinner(activeGame.state.boards) : null;
+  const iAmP1Active =
+    !!activeGame && !!myPubKey && myPubKey === activeGame.state.p1PubKeyHex;
+  const iAmP2Active =
+    !!activeGame && !!myPubKey && myPubKey === activeGame.state.p2PubKeyHex;
+  const canClaimSuperActive =
+    !!activeGame &&
+    activeGame.phase === "won" &&
+    metaW !== null &&
+    ((metaW === CELL_X && iAmP1Active) || (metaW === CELL_O && iAmP2Active));
+  const canDrawSuperActive =
+    !!activeGame && activeGame.phase === "drawn" && (iAmP1Active || iAmP2Active);
 
   const myTurn =
     activeGame &&
@@ -685,20 +770,34 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                 <Alert status="info" borderRadius="md" fontSize="sm">
                   <AlertIcon />
                   <AlertDescription>
-                    Meta draw: both players must co-sign a spend of this box (same as
-                    classic tic-tac-toe). A dedicated &quot;draw payout&quot; builder is not
-                    wired in this UI yet — use a wallet that can co-sign the raw
-                    transaction or extend the app.
+                    Meta draw: each player taps &quot;Sign draw split&quot; so Nautilus can
+                    merge both signatures (50/50 after fee). Vault-only needs off-app
+                    co-signing.
                   </AlertDescription>
                 </Alert>
+              )}
+              {canDrawSuperActive && (
+                <Button
+                  size="sm"
+                  colorScheme="purple"
+                  onClick={() => void handleDrawSplit()}
+                  isDisabled={busy}
+                >
+                  Sign draw split
+                </Button>
               )}
               {activeGame.phase === "open" && myPubKey === activeGame.state.p1PubKeyHex && (
                 <Button size="sm" variant="outline" onClick={handleCancel} isDisabled={busy}>
                   Cancel open game
                 </Button>
               )}
-              {metaW !== null && activeGame.phase === "won" && (
-                <Button size="sm" colorScheme="green" onClick={handleClaimWin} isDisabled={busy}>
+              {canClaimSuperActive && (
+                <Button
+                  size="sm"
+                  colorScheme="green"
+                  onClick={() => void handleClaimWin()}
+                  isDisabled={busy}
+                >
                   Claim win
                 </Button>
               )}
@@ -786,6 +885,14 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                         !!myPubKey &&
                         !optimistic &&
                         !inflight;
+                      const wMeta = superWinner(g.state.boards);
+                      const canClaimLobby =
+                        g.phase === "won" &&
+                        (iAmP1 || iAmP2) &&
+                        wMeta !== null &&
+                        ((wMeta === CELL_X && iAmP1) || (wMeta === CELL_O && iAmP2));
+                      const canDrawLobby =
+                        g.phase === "drawn" && (iAmP1 || iAmP2) && !optimistic;
                       const sg = superChainStateToGame(g.state);
                       const st = superStatusOf(sg);
                       return (
@@ -825,6 +932,26 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                                   Manage
                                 </Button>
                               )}
+                              {canClaimLobby && (
+                                <Button
+                                  size="xs"
+                                  colorScheme="green"
+                                  onClick={() => void handleClaimWin(g)}
+                                  isDisabled={busy}
+                                >
+                                  Claim
+                                </Button>
+                              )}
+                              {canDrawLobby && (
+                                <Button
+                                  size="xs"
+                                  colorScheme="purple"
+                                  onClick={() => void handleDrawSplit(g)}
+                                  isDisabled={busy}
+                                >
+                                  Sign draw
+                                </Button>
+                              )}
                             </HStack>
                           </Td>
                         </Tr>
@@ -856,16 +983,21 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                       <Td>{h.phase}</Td>
                       <Td>{h.settlementHeight}</Td>
                       <Td>
-                        <Button
-                          as="a"
-                          size="xs"
-                          variant="link"
-                          href={`${EXPLORER_TX}${h.spentTransactionId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {h.spentTransactionId.slice(0, 10)}…
-                        </Button>
+                        <HStack spacing={2}>
+                          <Button
+                            as="a"
+                            size="xs"
+                            variant="link"
+                            href={`${EXPLORER_TX}${h.spentTransactionId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {h.spentTransactionId.slice(0, 10)}…
+                          </Button>
+                          <Button size="xs" variant="outline" onClick={() => setHistoryInspect(h)}>
+                            Board
+                          </Button>
+                        </HStack>
                       </Td>
                     </Tr>
                   ))}
@@ -875,7 +1007,112 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
           )}
         </>
       )}
+
+      <SuperXoxoFinishedModal
+        row={historyInspect}
+        onClose={() => setHistoryInspect(null)}
+        contractAddress={contractAddress}
+      />
     </Stack>
+  );
+};
+
+interface SuperXoxoFinishedModalProps {
+  row: SuperGameHistorySnapshot | null;
+  onClose: () => void;
+  contractAddress: string;
+}
+
+const SuperXoxoFinishedModal: React.FC<SuperXoxoFinishedModalProps> = ({
+  row,
+  onClose,
+  contractAddress,
+}) => {
+  if (!row) return null;
+  const addrs = getSuperPlayerAddresses(row.state);
+  const g = superChainStateToGame(row.state);
+  const st = superStatusOf(g);
+  const label =
+    row.phase === "open"
+      ? "Cancelled"
+      : row.phase === "won"
+        ? "Won (claimed)"
+        : row.phase === "drawn"
+          ? "Draw"
+          : row.phase;
+
+  return (
+    <Modal isOpen onClose={onClose} size="xl">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Finished xoxo</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <Stack spacing={4}>
+            <HStack>
+              <Badge
+                colorScheme={
+                  row.phase === "won" ? "green" : row.phase === "drawn" ? "gray" : "orange"
+                }
+              >
+                {label}
+              </Badge>
+              <Text fontSize="xs" opacity={0.7}>
+                Block {row.settlementHeight}
+              </Text>
+            </HStack>
+            <Text fontSize="sm" opacity={0.85}>
+              Last on-chain box before the closing transaction (not every intermediate
+              move).
+            </Text>
+            <Flex justify="center" overflowX="auto">
+              <SuperTicTacToeBoard game={g} readOnly />
+            </Flex>
+            <Stack spacing={1} fontSize="sm">
+              <Text>
+                <strong>Wager (each):</strong> {formatErg(row.state.wagerNanoErg)} ERG
+              </Text>
+              <Text>
+                <strong>Pot (this box):</strong> {formatErg(BigInt(row.box.value))} ERG
+              </Text>
+              <Text>
+                <strong>X:</strong> <Code fontSize="xs">{truncAddr(addrs.p1)}</Code>
+              </Text>
+              <Text>
+                <strong>O:</strong>{" "}
+                {addrs.p2 ? (
+                  <Code fontSize="xs">{truncAddr(addrs.p2)}</Code>
+                ) : (
+                  "—"
+                )}
+              </Text>
+              {st.kind === "ongoing" && (
+                <Text fontSize="xs" opacity={0.75}>
+                  Turn at snapshot: <strong>{st.turn}</strong>
+                </Text>
+              )}
+              <Text fontSize="xs" wordBreak="break-all">
+                <strong>Contract:</strong> <Code fontSize="xs">{truncAddr(contractAddress)}</Code>
+              </Text>
+              <Button
+                as="a"
+                size="xs"
+                variant="link"
+                href={`${EXPLORER_TX}${row.spentTransactionId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                alignSelf="flex-start"
+              >
+                Closing transaction
+              </Button>
+            </Stack>
+          </Stack>
+        </ModalBody>
+        <ModalFooter>
+          <Button onClick={onClose}>Close</Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   );
 };
 

@@ -14,6 +14,7 @@ import {
   Text,
   useColorMode,
 } from "@chakra-ui/react";
+import { Link as RouterLink } from "react-router-dom";
 import { useWallet } from "../../context/WalletContext";
 import {
   applySuperMove,
@@ -78,6 +79,9 @@ export const SuperTicTacToePage: React.FC = () => {
             opponent must play in the mini-board matching your cell — unless that
             board is already finished, then they get a free move anywhere.
           </Text>
+          <Button as={RouterLink} to="/games/tic-tac-toe" size="sm" variant="link" alignSelf="flex-start">
+            Classic 3×3 on-chain tic-tac-toe →
+          </Button>
         </Stack>
 
         <Box

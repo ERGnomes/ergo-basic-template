@@ -42,10 +42,14 @@ import {
   useToast,
 } from "@chakra-ui/react";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { Link as RouterLink } from "react-router-dom";
 import { useWallet } from "../../context/WalletContext";
 import {
   statusOf,
   type Board,
+  winnerOf,
+  CELL_X,
+  CELL_O,
 } from "../../lib/games/ticTacToeLogic";
 import {
   getGameP2SAddress,
@@ -60,6 +64,7 @@ import {
   buildCancelGameTx,
   buildClaimWinTx,
   buildCreateGameTx,
+  buildDrawSplitTx,
   buildJoinGameTx,
   buildMoveTx,
   getPlayerAddresses,
@@ -565,7 +570,11 @@ export const TicTacToePage: React.FC = () => {
           spentBoxId: activeGame.box.boxId,
           predicted: null,
           predictedPhase: "spent",
-          follow: null,
+          follow: {
+            p1PubKeyHex: activeGame.state.p1PubKeyHex,
+            p2PubKeyHex: activeGame.state.p1PubKeyHex,
+            wagerNanoErg: activeGame.state.wagerNanoErg.toString(),
+          },
           description: `Cancelling game (refund ${formatErg(
             BigInt(activeGame.box.value)
           )} ERG)`,
@@ -587,23 +596,28 @@ export const TicTacToePage: React.FC = () => {
     });
   };
 
-  const handleClaimWin = async () => {
-    if (!activeGame || !ergoAddress || !myPubKey) return;
+  const handleClaimWin = async (gameOverride?: DiscoveredGame | null) => {
+    const g = gameOverride ?? activeGame;
+    if (!g || !ergoAddress || !myPubKey) return;
     await withBusy("Building claim transaction…", async () => {
       try {
         const tx = await buildClaimWinTx({
-          currentGameBox: activeGame.box,
-          currentGameState: activeGame.state,
+          currentGameBox: g.box,
+          currentGameState: g.state,
           winnerAddress: ergoAddress,
           winnerPubKeyHex: myPubKey,
         });
         const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
           kind: "claim",
-          spentBoxId: activeGame.box.boxId,
+          spentBoxId: g.box.boxId,
           predicted: null,
           predictedPhase: "spent",
-          follow: null,
-          description: `Claiming ${formatErg(BigInt(activeGame.box.value))} ERG pot`,
+          follow: {
+            p1PubKeyHex: g.state.p1PubKeyHex,
+            p2PubKeyHex: g.state.p2PubKeyHex,
+            wagerNanoErg: g.state.wagerNanoErg.toString(),
+          },
+          description: `Claiming ${formatErg(BigInt(g.box.value))} ERG pot`,
         };
         const ok = await signAndSubmitTx(tx, pendingTemplate);
         if (ok) {
@@ -616,6 +630,61 @@ export const TicTacToePage: React.FC = () => {
           description: err?.message || String(err),
           status: "error",
           duration: 6000,
+          isClosable: true,
+        });
+      }
+    });
+  };
+
+  const handleDrawSplit = async (gameOverride?: DiscoveredGame | null) => {
+    const g = gameOverride ?? activeGame;
+    if (!g || !ergoAddress || !myPubKey) return;
+    await withBusy("Building draw split transaction…", async () => {
+      try {
+        const addrs = getPlayerAddresses(g.state);
+        const p1Addr = addrs.p1;
+        const p2Addr = addrs.p2;
+        if (!p2Addr) {
+          toast({ title: "Opponent address unknown", status: "error" });
+          return;
+        }
+        const tx = await buildDrawSplitTx({
+          currentGameBox: g.box,
+          currentGameState: g.state,
+          p1Address: p1Addr,
+          p2Address: p2Addr,
+          signerPubKeyHex: myPubKey,
+        });
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "draw",
+          spentBoxId: g.box.boxId,
+          predicted: null,
+          predictedPhase: "spent",
+          follow: {
+            p1PubKeyHex: g.state.p1PubKeyHex,
+            p2PubKeyHex: g.state.p2PubKeyHex,
+            wagerNanoErg: g.state.wagerNanoErg.toString(),
+          },
+          description: "Draw — split pot (needs both signatures)",
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) {
+          toast({
+            title: "Your signature is attached",
+            description:
+              "Your opponent must open the same game and sign the same draw split (Nautilus merges signatures when both halves match).",
+            status: "info",
+            duration: 12000,
+            isClosable: true,
+          });
+          setTimeout(refreshGames, 3000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't build draw transaction",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 8000,
           isClosable: true,
         });
       }
@@ -642,6 +711,15 @@ export const TicTacToePage: React.FC = () => {
           transaction. You need TWO different wallets to play a real
           game — the contract won't let you join your own open game.
         </Text>
+        <Button
+          as={RouterLink}
+          to="/games/xoxo"
+          size="sm"
+          variant="link"
+          alignSelf="flex-start"
+        >
+          Ultimate (xoxo) on-chain →
+        </Button>
         <Text fontSize="xs" opacity={0.6}>
           Contract: <Code fontSize="xs">{truncAddr(contractAddress)}</Code>
         </Text>
@@ -725,11 +803,14 @@ export const TicTacToePage: React.FC = () => {
                 p.follow &&
                 p.follow.p1PubKeyHex === activeGame.state.p1PubKeyHex &&
                 (p.follow.p2PubKeyHex === activeGame.state.p2PubKeyHex ||
-                  (p.kind === "cancel" || p.kind === "claim"))
+                  p.kind === "cancel" ||
+                  p.kind === "claim" ||
+                  p.kind === "draw")
             )}
             onMove={handleMove}
             onCancel={handleCancel}
-            onClaimWin={handleClaimWin}
+            onClaimWin={() => void handleClaimWin()}
+            onDrawSplit={() => void handleDrawSplit()}
             onBack={() => setActiveGame(null)}
           />
         ) : (
@@ -759,6 +840,8 @@ export const TicTacToePage: React.FC = () => {
               onRefresh={refreshGames}
               onJoin={handleJoin}
               onOpen={setActiveGame}
+              onClaimFromLobby={(g) => void handleClaimWin(g)}
+              onDrawSplitFromLobby={(g) => void handleDrawSplit(g)}
               busy={busy}
               pendingBoxIdsBeingSpent={pendingBoxIdsBeingSpent}
             />
@@ -1177,6 +1260,8 @@ interface GameListProps {
   onRefresh: () => void;
   onJoin: (g: DiscoveredGame) => void;
   onOpen: (g: DiscoveredGame) => void;
+  onClaimFromLobby: (g: DiscoveredGame) => void;
+  onDrawSplitFromLobby: (g: DiscoveredGame) => void;
   busy: boolean;
   pendingBoxIdsBeingSpent: Set<string>;
 }
@@ -1189,6 +1274,8 @@ const GameList: React.FC<GameListProps> = ({
   onRefresh,
   onJoin,
   onOpen,
+  onClaimFromLobby,
+  onDrawSplitFromLobby,
   busy,
   pendingBoxIdsBeingSpent,
 }) => {
@@ -1253,6 +1340,14 @@ const GameList: React.FC<GameListProps> = ({
                   !!myPubKey &&
                   !isOptimistic &&
                   !hasInflightSpend;
+                const w = winnerOf(g.state.board);
+                const canClaimFromLobby =
+                  g.phase === "won" &&
+                  iAmParticipant &&
+                  w !== null &&
+                  ((w === CELL_X && iAmP1) || (w === CELL_O && iAmP2));
+                const canDrawFromLobby =
+                  g.phase === "drawn" && iAmParticipant && !isOptimistic;
                 return (
                   <Tr key={g.box.boxId}>
                     <Td>
@@ -1319,6 +1414,26 @@ const GameList: React.FC<GameListProps> = ({
                             Play
                           </Button>
                         )}
+                        {canClaimFromLobby && (
+                          <Button
+                            size="xs"
+                            colorScheme="green"
+                            onClick={() => onClaimFromLobby(g)}
+                            isDisabled={busy}
+                          >
+                            Claim
+                          </Button>
+                        )}
+                        {canDrawFromLobby && (
+                          <Button
+                            size="xs"
+                            colorScheme="purple"
+                            onClick={() => onDrawSplitFromLobby(g)}
+                            isDisabled={busy}
+                          >
+                            Sign draw
+                          </Button>
+                        )}
                       </HStack>
                     </Td>
                   </Tr>
@@ -1343,6 +1458,7 @@ interface ActiveViewProps {
   onMove: (cell: number) => void;
   onCancel: () => void;
   onClaimWin: () => void;
+  onDrawSplit: () => void;
   onBack: () => void;
 }
 
@@ -1355,6 +1471,7 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   onMove,
   onCancel,
   onClaimWin,
+  onDrawSplit,
   onBack,
 }) => {
   const { colorMode } = useColorMode();
@@ -1389,6 +1506,8 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   const canClaimWin =
     status.kind === "won" &&
     ((status.winner === "X" && iAmP1) || (status.winner === "O" && iAmP2));
+  const canDrawSplit =
+    status.kind === "drawn" && (iAmP1 || iAmP2);
   const canCancel = status.kind === "open" && iAmP1;
 
   return (
@@ -1491,15 +1610,10 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
               Claim pot ({formatErg(BigInt(game.box.value))} ERG)
             </Button>
           )}
-          {status.kind === "drawn" && (
-            <Alert status="info" borderRadius="md" maxW="420px">
-              <AlertIcon />
-              <AlertDescription fontSize="sm">
-                Draw. Phase-1 contract requires both players to co-sign
-                to split the pot; that's not yet wired in the UI.
-                Contact your opponent off-chain.
-              </AlertDescription>
-            </Alert>
+          {canDrawSplit && (
+            <Button colorScheme="purple" variant="solid" onClick={onDrawSplit} isLoading={busy}>
+              Sign draw split (50/50 + fee)
+            </Button>
           )}
         </HStack>
       </VStack>

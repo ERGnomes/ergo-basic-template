@@ -31,6 +31,7 @@ import {
   Board,
   EMPTY_BOARD,
   isXTurn,
+  nonEmptyCount,
   winnerOf,
   CELL_X,
   CELL_EMPTY,
@@ -351,6 +352,67 @@ export const buildClaimWinTx = async (params: {
     .to(out)
     .sendChangeTo(winnerAddress)
     .payFee(fee)
+    .build()
+    .toEIP12Object();
+
+  return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
+};
+
+/**
+ * Draw: full board, no winner — contract requires p1 AND p2 to co-sign.
+ * Splits (box value − fee) evenly between the two player addresses (p1 gets +1 nano if odd).
+ */
+export const buildDrawSplitTx = async (params: {
+  currentGameBox: any;
+  currentGameState: GameState;
+  p1Address: string;
+  p2Address: string;
+  signerPubKeyHex: string;
+}) => {
+  const { currentGameState, p1Address, p2Address, signerPubKeyHex } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
+    throw new Error("Game is not joined.");
+  }
+  const w = winnerOf(currentGameState.board);
+  if (w !== null) {
+    throw new Error("There is a winner — use claim instead.");
+  }
+  if (nonEmptyCount(currentGameState.board) !== 9) {
+    throw new Error("Board is not full — game is not a draw yet.");
+  }
+  if (
+    signerPubKeyHex !== currentGameState.p1PubKeyHex &&
+    signerPubKeyHex !== currentGameState.p2PubKeyHex
+  ) {
+    throw new Error("Only a participant can build the draw split transaction.");
+  }
+
+  const height = await fetchCurrentHeight();
+  const gameValue = BigInt(currentGameBox.value);
+  const fee = RECOMMENDED_MIN_FEE_VALUE;
+  const potAfterFee = gameValue - fee;
+  if (potAfterFee <= BigInt(0)) {
+    throw new Error("Box value too low to pay network fee and split.");
+  }
+  const half = potAfterFee / BigInt(2);
+  const rem = potAfterFee % BigInt(2);
+  const toP1 = half + rem;
+  const toP2 = half;
+  const minPer = SAFE_MIN_BOX_VALUE;
+  if (toP1 < minPer || toP2 < minPer) {
+    throw new Error("Pot too small to split into two valid outputs after fee.");
+  }
+
+  const out1 = new OutputBuilder(toP1, ErgoAddress.fromBase58(p1Address));
+  const out2 = new OutputBuilder(toP2, ErgoAddress.fromBase58(p2Address));
+
+  const unsigned = new TransactionBuilder(height)
+    .from([currentGameBox])
+    .to(out1)
+    .to(out2)
+    .payFee(fee)
+    .sendChangeTo(p1Address)
     .build()
     .toEIP12Object();
 

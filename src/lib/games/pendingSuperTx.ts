@@ -5,7 +5,7 @@
 
 import type { SuperBoard } from "./superTicTacToeLogic";
 
-export type PendingSuperKind = "create" | "join" | "move" | "cancel" | "claim";
+export type PendingSuperKind = "create" | "join" | "move" | "cancel" | "claim" | "draw";
 
 export interface PendingSuperTx {
   id: string;
@@ -104,7 +104,7 @@ export const reconcilePendingSuper = (snap: SuperChainSnapshot): void => {
       ? snap.unspentTriples.has(followKey)
       : false;
 
-    if (p.kind === "cancel" || p.kind === "claim") {
+    if (p.kind === "cancel" || p.kind === "claim" || p.kind === "draw") {
       if (spentDisappeared) continue;
       surviving.push(p);
     } else if (p.kind === "create") {
