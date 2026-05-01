@@ -1,16 +1,24 @@
 /**
  * Explorer-backed discovery for Ultimate (Super) tic-tac-toe boxes.
+ *
+ * Uses GraphQL POST (ergoTree in JSON body) instead of REST GET byErgoTree,
+ * because the super contract ErgoTree hex is ~7.6k characters — GET URLs hit
+ * browser/proxy limits and fail with NetworkError.
  */
 
 import {
-  ExplorerBoxLike,
   getSuperGameErgoTreeHex,
   parseSuperGameBox,
   type SuperChainGameState,
 } from "./superTicTacToeContract";
 import { superMetaFull, superWinner } from "./superTicTacToeLogic";
+import {
+  fetchBoxesByErgoTreeGql,
+  gqlBoxToExplorerLike,
+  type GqlExplorerBoxLike,
+} from "./explorerGql";
 
-const EXPLORER_API = "https://api.ergoplatform.com/api/v1";
+export type ExplorerBoxLike = GqlExplorerBoxLike;
 
 export interface DiscoveredSuperGame {
   box: ExplorerBoxLike;
@@ -53,17 +61,13 @@ const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredSuperGame | null => {
   return { box, state, phase, isJoined };
 };
 
+const treeHex = (): string => getSuperGameErgoTreeHex();
+
 export const fetchAllSuperGames = async (): Promise<DiscoveredSuperGame[]> => {
-  const treeHex = getSuperGameErgoTreeHex();
-  const url = `${EXPLORER_API}/boxes/unspent/byErgoTree/${treeHex}?limit=100`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Explorer HTTP ${res.status}`);
-  }
-  const body = await res.json();
-  const items: ExplorerBoxLike[] = body.items || [];
+  const rows = await fetchBoxesByErgoTreeGql(treeHex(), { spent: false, take: 100 });
   const games: DiscoveredSuperGame[] = [];
-  for (const box of items) {
+  for (const row of rows) {
+    const box = gqlBoxToExplorerLike(row);
     const g = boxToDiscovered(box);
     if (g) games.push(g);
   }
@@ -78,16 +82,10 @@ export const fetchOpenSuperGames = async (): Promise<DiscoveredSuperGame[]> => {
 export const fetchRecentSuperGameHistory = async (
   limit = 30
 ): Promise<SuperGameHistorySnapshot[]> => {
-  const treeHex = getSuperGameErgoTreeHex();
-  const url = `${EXPLORER_API}/boxes/byErgoTree/${treeHex}?limit=${limit}&offset=0&sortDirection=desc`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Explorer HTTP ${res.status}`);
-  }
-  const body = await res.json();
-  const items: ExplorerBoxLike[] = body.items || [];
+  const rows = await fetchBoxesByErgoTreeGql(treeHex(), { spent: true, take: limit });
   const out: SuperGameHistorySnapshot[] = [];
-  for (const box of items) {
+  for (const row of rows) {
+    const box = gqlBoxToExplorerLike(row);
     const g = boxToDiscovered(box);
     if (!g) continue;
     const spent = box.spentTransactionId;
@@ -104,7 +102,8 @@ export const fetchRecentSuperGameHistory = async (
       spentTransactionId: spent,
     });
   }
-  return out;
+  out.sort((a, b) => b.settlementHeight - a.settlementHeight);
+  return out.slice(0, limit);
 };
 
 export const findCurrentSuperBoxForGame = async (
@@ -125,10 +124,12 @@ export const findCurrentSuperBoxForGame = async (
   return null;
 };
 
+const EXPLORER_REST = "https://api.ergoplatform.com/api/v1";
+
 export const fetchSuperBoxById = async (
   boxId: string
 ): Promise<ExplorerBoxLike | null> => {
-  const res = await fetch(`${EXPLORER_API}/boxes/${encodeURIComponent(boxId)}`);
+  const res = await fetch(`${EXPLORER_REST}/boxes/${encodeURIComponent(boxId)}`);
   if (!res.ok) return null;
   return (await res.json()) as ExplorerBoxLike;
 };

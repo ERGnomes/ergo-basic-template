@@ -193,7 +193,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
   }, [refreshGames]);
 
   useEffect(() => {
-    const period = pending.length > 0 ? 5_000 : 15_000;
+    const period = pending.length > 0 ? 8_000 : 25_000;
     const iv = setInterval(refreshGames, period);
     return () => clearInterval(iv);
   }, [refreshGames, pending.length]);
