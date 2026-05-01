@@ -1,61 +1,33 @@
 /**
- * Transaction builders for the tic-tac-toe contract.
- *
- * Each builder returns an EIP-12 unsigned transaction object ready to
- * be handed to `signAndSubmit(...)`. The builder is pure — it doesn't
- * talk to the network beyond fetching the UTXOs it needs to fund the
- * transaction.
- *
- * The four entry points map 1:1 to the contract branches:
- *
- *   buildCreateGameTx   — no game box yet; creator funds a new one
- *   buildJoinGameTx     — joiner consumes an open game + adds wager
- *   buildMoveTx         — current mover consumes the current game box
- *                          and creates a new one with one more cell
- *                          filled
- *   buildCancelGameTx   — creator cancels an open game and recovers
- *                          their wager
- *   buildClaimWinTx     — winner drains the box after a 3-in-a-row
+ * Transaction builders for the Ultimate (Super) tic-tac-toe contract.
+ * Mirrors `ticTacToeTx.ts` (create / join / move / cancel / claim).
  */
 
 import {
   ErgoAddress,
-  Network,
   OutputBuilder,
   RECOMMENDED_MIN_FEE_VALUE,
   SAFE_MIN_BOX_VALUE,
   TransactionBuilder,
 } from "@fleet-sdk/core";
 import {
-  applyMove,
-  Board,
-  EMPTY_BOARD,
-  isXTurn,
-  nonEmptyCount,
-  winnerOf,
-  CELL_X,
-  CELL_EMPTY,
-} from "./ticTacToeLogic";
+  applySuperMove,
+  isLegalSuperMove,
+  superMetaFull,
+  superWinner,
+  totalMoves,
+  type SuperGame,
+} from "./superTicTacToeLogic";
 import {
-  encodeAllRegisters,
-  GameState,
-  getGameP2SAddress,
+  encodeSuperAllRegisters,
+  getSuperGameP2SAddress,
   pubkeyToMainnetAddress,
-} from "./ticTacToeContract";
+  type SuperChainGameState,
+} from "./superTicTacToeContract";
+import { CELL_X } from "./ticTacToeLogic";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 
-/**
- * Explorer v1 returns registers as
- *   { R4: { serializedValue, sigmaType, renderedValue }, ... }
- * but Fleet's TransactionBuilder.from() and sigma-rust's
- * ErgoBoxes.from_boxes_json() both expect flat hex strings:
- *   { R4: "0e09...", ... }
- * Without this flattening, Fleet throws
- * `Expected an object of type 'string', got 'object'`
- * on any box that has registers (our game box does — P2PK boxes don't,
- * which is why the Send-ERG path doesn't hit it).
- */
 const normalizeExplorerBox = (box: any): any => {
   const regs = box?.additionalRegisters;
   if (!regs || typeof regs !== "object") return box;
@@ -90,14 +62,29 @@ const fetchCurrentHeight = async (): Promise<number> => {
   return (body.items || body)[0].height;
 };
 
-/**
- * Build the transaction that creates a brand-new open game. The box
- * is funded with `wagerNanoErg + SAFE_MIN_BOX_VALUE` from the creator's
- * address; change goes back to them.
- *
- * R6 is set equal to R5 (creator's pubkey) to encode the "open" state.
- */
-export const buildCreateGameTx = async (params: {
+const emptySuperChainState = (
+  p1: string,
+  p2: string,
+  wager: bigint
+): SuperChainGameState => ({
+  boards: [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+  ] as unknown as SuperChainGameState["boards"],
+  constraintSub: null,
+  p1PubKeyHex: p1,
+  p2PubKeyHex: p2,
+  wagerNanoErg: wager,
+});
+
+export const buildSuperCreateGameTx = async (params: {
   creatorAddress: string;
   creatorPubKeyHex: string;
   wagerNanoErg: bigint;
@@ -110,17 +97,16 @@ export const buildCreateGameTx = async (params: {
   const inputs = normalizeExplorerBoxes(await fetchUnspentBoxes(creatorAddress));
   if (inputs.length === 0) throw new Error("No unspent boxes at your address.");
   const height = await fetchCurrentHeight();
-  const contractAddress = getGameP2SAddress();
+  const contractAddress = getSuperGameP2SAddress();
 
   const gameBoxValue = wagerNanoErg + SAFE_MIN_BOX_VALUE;
 
-  const gameState: GameState = {
-    board: EMPTY_BOARD,
-    p1PubKeyHex: creatorPubKeyHex,
-    p2PubKeyHex: creatorPubKeyHex,
-    wagerNanoErg,
-  };
-  const regs = encodeAllRegisters(gameState);
+  const gameState = emptySuperChainState(
+    creatorPubKeyHex,
+    creatorPubKeyHex,
+    wagerNanoErg
+  );
+  const regs = encodeSuperAllRegisters(gameState);
 
   const out = new OutputBuilder(
     gameBoxValue,
@@ -130,6 +116,7 @@ export const buildCreateGameTx = async (params: {
     R5: regs.R5 as any,
     R6: regs.R6 as any,
     R7: regs.R7 as any,
+    R8: regs.R8 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -143,17 +130,9 @@ export const buildCreateGameTx = async (params: {
   return { unsignedEip12: unsigned, inputBoxes: inputs };
 };
 
-/**
- * Build the transaction that joins an existing open game.
- *
- * The joiner spends (a) the game box and (b) enough of their own
- * UTXOs to top the box up by `wager`. The output game box re-uses
- * the contract, preserves R4/R5/R7, and replaces R6 with the joiner's
- * pubkey.
- */
-export const buildJoinGameTx = async (params: {
-  currentGameBox: any; // Explorer box shape
-  currentGameState: GameState;
+export const buildSuperJoinGameTx = async (params: {
+  currentGameBox: any;
+  currentGameState: SuperChainGameState;
   joinerAddress: string;
   joinerPubKeyHex: string;
 }) => {
@@ -172,28 +151,26 @@ export const buildJoinGameTx = async (params: {
   }
   const height = await fetchCurrentHeight();
 
-  const newState: GameState = {
+  const newState: SuperChainGameState = {
     ...currentGameState,
     p2PubKeyHex: joinerPubKeyHex,
   };
-  const regs = encodeAllRegisters(newState);
+  const regs = encodeSuperAllRegisters(newState);
 
   const newValue =
     BigInt(currentGameBox.value) + currentGameState.wagerNanoErg;
 
   const out = new OutputBuilder(
     newValue,
-    ErgoAddress.fromBase58(getGameP2SAddress())
+    ErgoAddress.fromBase58(getSuperGameP2SAddress())
   ).setAdditionalRegisters({
     R4: regs.R4 as any,
     R5: regs.R5 as any,
     R6: regs.R6 as any,
     R7: regs.R7 as any,
+    R8: regs.R8 as any,
   });
 
-  // The game box MUST be input 0 for the contract's OUTPUTS(0) check to
-  // line up with input 0. Fleet's TransactionBuilder preserves the
-  // order it receives inputs in.
   const unsigned = new TransactionBuilder(height)
     .from([currentGameBox, ...funding])
     .to(out)
@@ -208,56 +185,80 @@ export const buildJoinGameTx = async (params: {
   };
 };
 
-/**
- * Build a move transaction: spend the current game box, produce a new
- * one with a single additional cell filled.
- */
-export const buildMoveTx = async (params: {
+const chainToSuperGame = (s: SuperChainGameState): SuperGame => ({
+  boards: s.boards,
+  constraintSub: s.constraintSub,
+});
+
+const superGameToChain = (
+  g: SuperGame,
+  p1: string,
+  p2: string,
+  wager: bigint
+): SuperChainGameState => ({
+  boards: g.boards,
+  constraintSub: g.constraintSub,
+  p1PubKeyHex: p1,
+  p2PubKeyHex: p2,
+  wagerNanoErg: wager,
+});
+
+export const buildSuperMoveTx = async (params: {
   currentGameBox: any;
-  currentGameState: GameState;
+  currentGameState: SuperChainGameState;
   moverAddress: string;
   moverPubKeyHex: string;
-  cell: number; // 0..8
+  subIndex: number;
+  cellIndex: number;
 }) => {
-  const { currentGameState, moverAddress, moverPubKeyHex, cell } = params;
+  const { currentGameState, moverAddress, moverPubKeyHex, subIndex, cellIndex } =
+    params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game hasn't been joined yet.");
   }
-  if (winnerOf(currentGameState.board) !== null) {
-    throw new Error("Game is already won.");
+  if (superWinner(currentGameState.boards) !== null) {
+    throw new Error("Game is already won on the meta board.");
+  }
+  if (superMetaFull(currentGameState.boards)) {
+    throw new Error("Meta board is full.");
   }
 
-  const myTurnAsP1 = isXTurn(currentGameState.board);
-  const expectedPubKey = myTurnAsP1
+  const game = chainToSuperGame(currentGameState);
+  const xTurn = totalMoves(currentGameState.boards) % 2 === 0;
+  const expectedPubKey = xTurn
     ? currentGameState.p1PubKeyHex
     : currentGameState.p2PubKeyHex;
   if (expectedPubKey !== moverPubKeyHex) {
     throw new Error("It's not your turn.");
   }
 
-  if (currentGameState.board[cell] !== CELL_EMPTY) {
-    throw new Error("That cell is already taken.");
+  if (!isLegalSuperMove(game, subIndex, cellIndex)) {
+    throw new Error("Illegal move for Ultimate tic-tac-toe.");
   }
 
-  const nextBoard = applyMove(currentGameState.board, cell);
-  const nextState: GameState = { ...currentGameState, board: nextBoard };
-  const regs = encodeAllRegisters(nextState);
+  const nextGame = applySuperMove(game, subIndex, cellIndex);
+  const nextState = superGameToChain(
+    nextGame,
+    currentGameState.p1PubKeyHex,
+    currentGameState.p2PubKeyHex,
+    currentGameState.wagerNanoErg
+  );
+  const regs = encodeSuperAllRegisters(nextState);
 
-  // We may need extra funding to pay the fee; fetch the mover's other
-  // UTXOs to chip in.
   const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(moverAddress));
   const height = await fetchCurrentHeight();
 
   const out = new OutputBuilder(
     BigInt(currentGameBox.value),
-    ErgoAddress.fromBase58(getGameP2SAddress())
+    ErgoAddress.fromBase58(getSuperGameP2SAddress())
   ).setAdditionalRegisters({
     R4: regs.R4 as any,
     R5: regs.R5 as any,
     R6: regs.R6 as any,
     R7: regs.R7 as any,
+    R8: regs.R8 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -274,13 +275,9 @@ export const buildMoveTx = async (params: {
   };
 };
 
-/**
- * Build the transaction that cancels an open game and recovers the
- * creator's wager. Only valid while p1 == p2 (open state).
- */
-export const buildCancelGameTx = async (params: {
+export const buildSuperCancelGameTx = async (params: {
   currentGameBox: any;
-  currentGameState: GameState;
+  currentGameState: SuperChainGameState;
   creatorAddress: string;
   creatorPubKeyHex: string;
 }) => {
@@ -313,25 +310,20 @@ export const buildCancelGameTx = async (params: {
   return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
 };
 
-/**
- * Winner-takes-all claim after a 3-in-a-row. Only the winner's
- * pubkey can satisfy the contract, so this is safe to call for
- * either player as long as the board shows a win.
- */
-export const buildClaimWinTx = async (params: {
+export const buildSuperClaimWinTx = async (params: {
   currentGameBox: any;
-  currentGameState: GameState;
+  currentGameState: SuperChainGameState;
   winnerAddress: string;
   winnerPubKeyHex: string;
 }) => {
   const { currentGameState, winnerAddress, winnerPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
-  const winner = winnerOf(currentGameState.board);
-  if (winner === null) {
-    throw new Error("No winner yet.");
+  const w = superWinner(currentGameState.boards);
+  if (w === null) {
+    throw new Error("No meta-board winner yet.");
   }
   const expectedWinnerPk =
-    winner === CELL_X
+    w === CELL_X
       ? currentGameState.p1PubKeyHex
       : currentGameState.p2PubKeyHex;
   if (winnerPubKeyHex !== expectedWinnerPk) {
@@ -359,12 +351,11 @@ export const buildClaimWinTx = async (params: {
 };
 
 /**
- * Draw: full board, no winner — contract requires p1 AND p2 to co-sign.
- * Splits (box value − fee) evenly between the two player addresses (p1 gets +1 nano if odd).
+ * Meta draw: both players must co-sign. Split (value − fee) evenly between p1 and p2.
  */
-export const buildDrawSplitTx = async (params: {
+export const buildSuperDrawSplitTx = async (params: {
   currentGameBox: any;
-  currentGameState: GameState;
+  currentGameState: SuperChainGameState;
   p1Address: string;
   p2Address: string;
   signerPubKeyHex: string;
@@ -374,12 +365,11 @@ export const buildDrawSplitTx = async (params: {
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined.");
   }
-  const w = winnerOf(currentGameState.board);
-  if (w !== null) {
-    throw new Error("There is a winner — use claim instead.");
+  if (superWinner(currentGameState.boards) !== null) {
+    throw new Error("There is a meta winner — use claim instead.");
   }
-  if (nonEmptyCount(currentGameState.board) !== 9) {
-    throw new Error("Board is not full — game is not a draw yet.");
+  if (!superMetaFull(currentGameState.boards)) {
+    throw new Error("Meta board is not full — not a draw yet.");
   }
   if (
     signerPubKeyHex !== currentGameState.p1PubKeyHex &&
@@ -419,14 +409,10 @@ export const buildDrawSplitTx = async (params: {
   return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
 };
 
-/**
- * Helper: given a GameState, convert `p1PubKeyHex` / `p2PubKeyHex`
- * into base58 mainnet addresses — useful for the UI to show the
- * players.
- */
-export const getPlayerAddresses = (state: GameState) => ({
+export const getSuperPlayerAddresses = (state: SuperChainGameState) => ({
   p1: pubkeyToMainnetAddress(state.p1PubKeyHex),
-  p2: state.p1PubKeyHex === state.p2PubKeyHex
-    ? null
-    : pubkeyToMainnetAddress(state.p2PubKeyHex),
+  p2:
+    state.p1PubKeyHex === state.p2PubKeyHex
+      ? null
+      : pubkeyToMainnetAddress(state.p2PubKeyHex),
 });

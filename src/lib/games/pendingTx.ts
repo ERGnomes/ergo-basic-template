@@ -21,7 +21,7 @@
 
 import { Board } from "./ticTacToeLogic";
 
-export type PendingKind = "create" | "join" | "move" | "cancel" | "claim";
+export type PendingKind = "create" | "join" | "move" | "cancel" | "claim" | "draw";
 
 export interface PendingTx {
   /** Stable id; we use the on-chain txId once we have it. */
@@ -132,7 +132,7 @@ export const reconcilePending = (snap: ChainSnapshot): void => {
       ? snap.unspentTriples.has(followKey)
       : false;
 
-    if (p.kind === "cancel" || p.kind === "claim") {
+    if (p.kind === "cancel" || p.kind === "claim" || p.kind === "draw") {
       // Resolved when the spent box is gone (no successor expected).
       if (spentDisappeared) continue;
       surviving.push(p);
