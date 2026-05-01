@@ -24,6 +24,7 @@ import {
   NumberInput,
   NumberInputField,
   NumberInputStepper,
+  SimpleGrid,
   Spinner,
   Stack,
   Table,
@@ -71,6 +72,7 @@ import {
 } from "../../lib/games/superTicTacToeTx";
 import { signAndSubmit } from "../../lib/games/signAndSubmit";
 import { pubKeyHexFromAddress } from "../../lib/games/pubkey";
+import { RECOMMENDED_MIN_FEE_VALUE } from "@fleet-sdk/core";
 import {
   findExistingVault,
   unlockWithPasskey,
@@ -103,6 +105,66 @@ const formatErg = (nano: bigint | number | string) => {
 const truncAddr = (a: string) =>
   a.length > 20 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a;
 
+const potNano = (g: DiscoveredSuperGame) => BigInt(g.box.value);
+
+const splitAfterFee = (pot: bigint) => {
+  const fee = RECOMMENDED_MIN_FEE_VALUE;
+  const after = pot - fee;
+  if (after <= BigInt(0)) return null;
+  const half = after / BigInt(2);
+  const rem = after % BigInt(2);
+  return { fee, toP1: half + rem, toP2: half };
+};
+
+const outcomeLabel = (g: DiscoveredSuperGame): string => {
+  if (g.phase === "open") return "Open seat";
+  if (g.phase === "ongoing") {
+    const sg = superChainStateToGame(g.state);
+    const st = superStatusOf(sg);
+    return st.kind === "ongoing" ? `Live · ${st.turn} to move` : g.phase;
+  }
+  if (g.phase === "won") {
+    const w = superWinner(g.state.boards);
+    if (w === CELL_X) return "X won meta (claim)";
+    if (w === CELL_O) return "O won meta (claim)";
+    return "Won (claim)";
+  }
+  return "Draw (split)";
+};
+
+const prizeSummary = (g: DiscoveredSuperGame): string => {
+  const pot = potNano(g);
+  if (g.phase === "open") {
+    return `Creator locked ≈ ${formatErg(pot)} ERG; join matches wager.`;
+  }
+  if (g.phase === "ongoing") {
+    return `Pot ≈ ${formatErg(pot)} ERG · winner takes all; draw → ~50/50 after fee.`;
+  }
+  if (g.phase === "won") {
+    const w = superWinner(g.state.boards);
+    const who = w === CELL_X ? "X" : w === CELL_O ? "O" : "Winner";
+    return `${who} can claim ≈ ${formatErg(pot)} ERG (pot − fee).`;
+  }
+  const sp = splitAfterFee(pot);
+  if (!sp) return "Pot too small to split after fee.";
+  return `Each ≈ ${formatErg(sp.toP2)} / ${formatErg(sp.toP1)} ERG (fee ${formatErg(sp.fee)}).`;
+};
+
+const historyPrizeSummary = (h: SuperGameHistorySnapshot): string => {
+  const pot = BigInt(h.box.value);
+  if (h.phase === "won") {
+    const w = superWinner(h.state.boards);
+    const who = w === CELL_X ? "X" : w === CELL_O ? "O" : "Winner";
+    return `${who} claimed ≈ ${formatErg(pot)} ERG (final box value).`;
+  }
+  if (h.phase === "drawn") {
+    const sp = splitAfterFee(pot);
+    if (!sp) return "Draw settled (see tx).";
+    return `Split ≈ ${formatErg(sp.toP2)} + ${formatErg(sp.toP1)} ERG after fee.`;
+  }
+  return `—`;
+};
+
 type SigningKind = "nautilus" | "vault" | null;
 
 const tripleKey = (s: SuperChainGameState) =>
@@ -127,6 +189,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
   const [historyInspect, setHistoryInspect] = useState<SuperGameHistorySnapshot | null>(
     null
   );
+  const [watchGame, setWatchGame] = useState<DiscoveredSuperGame | null>(null);
 
   useEffect(() => {
     const unsub = subscribePendingSuper(() => setPending(getPendingSuperTxs()));
@@ -166,7 +229,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     try {
       const [out, hist] = await Promise.all([
         fetchAllSuperGames(),
-        fetchRecentSuperGameHistory(25).catch(() => [] as SuperGameHistorySnapshot[]),
+        fetchRecentSuperGameHistory(40).catch(() => [] as SuperGameHistorySnapshot[]),
       ]);
       setGames(out);
       setGameHistory(hist);
@@ -663,7 +726,15 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
   }
 
   return (
-    <Stack spacing={5}>
+    <Stack spacing={6}>
+      <Stack spacing={1}>
+        <Heading size="md">Live xoxo</Heading>
+        <Text fontSize="sm" opacity={0.75}>
+          Active games on this contract refresh automatically. Pots and outcomes are
+          read from the chain; final payouts follow the closing transaction on Explorer.
+        </Text>
+      </Stack>
+
       <Alert status="warning" borderRadius="md">
         <AlertIcon />
         <Stack spacing={1}>
@@ -754,9 +825,48 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                     : chainStatus.kind}
               </Badge>
             </HStack>
-            <Text fontSize="xs" opacity={0.75}>
-              Pot: {formatErg(BigInt(activeGame.box.value))} ERG · wager each:{" "}
-              {formatErg(activeGame.state.wagerNanoErg)} ERG
+            <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+              <Box
+                p={3}
+                borderRadius="md"
+                borderWidth="1px"
+                borderColor={colorMode === "light" ? "gray.200" : "whiteAlpha.300"}
+              >
+                <Text fontSize="xs" opacity={0.7} textTransform="uppercase">
+                  Pot (locked)
+                </Text>
+                <Text fontWeight="bold">{formatErg(BigInt(activeGame.box.value))} ERG</Text>
+              </Box>
+              <Box
+                p={3}
+                borderRadius="md"
+                borderWidth="1px"
+                borderColor={colorMode === "light" ? "gray.200" : "whiteAlpha.300"}
+              >
+                <Text fontSize="xs" opacity={0.7} textTransform="uppercase">
+                  Wager (each)
+                </Text>
+                <Text fontWeight="bold">{formatErg(activeGame.state.wagerNanoErg)} ERG</Text>
+              </Box>
+              <Box
+                p={3}
+                borderRadius="md"
+                borderWidth="1px"
+                borderColor={colorMode === "light" ? "gray.200" : "whiteAlpha.300"}
+              >
+                <Text fontSize="xs" opacity={0.7} textTransform="uppercase">
+                  Prize rule
+                </Text>
+                <Text fontSize="sm">
+                  {activeGame.phase === "ongoing" && "Winner takes full pot (− fee)."}
+                  {activeGame.phase === "won" && "Claim sends pot to meta-winner."}
+                  {activeGame.phase === "drawn" && "Co-sign split ~50/50 after fee."}
+                  {activeGame.phase === "open" && "Join doubles pot for play."}
+                </Text>
+              </Box>
+            </SimpleGrid>
+            <Text fontSize="xs" opacity={0.65}>
+              {prizeSummary(activeGame)}
             </Text>
             <Flex justify="center" overflowX="auto">
               <SuperTicTacToeBoard
@@ -846,8 +956,13 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
           <Divider />
 
           <Stack spacing={3}>
-            <HStack justify="space-between">
-              <Heading size="sm">xoxo lobby</Heading>
+            <HStack justify="space-between" flexWrap="wrap" gap={2}>
+              <Stack spacing={0}>
+                <Heading size="sm">Active games</Heading>
+                <Text fontSize="xs" opacity={0.65}>
+                  Join or watch any row; pots update after each confirmation.
+                </Text>
+              </Stack>
               <Button size="sm" variant="ghost" onClick={refreshGames} isLoading={refreshing}>
                 Refresh
               </Button>
@@ -865,10 +980,12 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                 <Table size="sm">
                   <Thead>
                     <Tr>
-                      <Th>Status</Th>
-                      <Th>Wager</Th>
+                      <Th>Outcome</Th>
                       <Th>Pot</Th>
-                      <Th>Creator</Th>
+                      <Th>Wager</Th>
+                      <Th>Prize</Th>
+                      <Th>X</Th>
+                      <Th>O</Th>
                       <Th></Th>
                     </Tr>
                   </Thead>
@@ -895,28 +1012,52 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                         g.phase === "drawn" && (iAmP1 || iAmP2) && !optimistic;
                       const sg = superChainStateToGame(g.state);
                       const st = superStatusOf(sg);
+                      const showWatch =
+                        g.phase === "ongoing" ||
+                        g.phase === "won" ||
+                        g.phase === "drawn";
                       return (
                         <Tr key={g.box.boxId}>
-                          <Td>
-                            <HStack spacing={1}>
-                              <Badge>
+                          <Td fontSize="xs" maxW="140px">
+                            <HStack spacing={1} flexWrap="wrap">
+                              <Badge fontSize="0.65rem">
                                 {g.phase === "ongoing" && st.kind === "ongoing"
                                   ? `turn ${st.turn}`
-                                  : g.phase}
+                                  : outcomeLabel(g)}
                               </Badge>
                               {(optimistic || inflight) && (
-                                <Badge colorScheme="yellow">pending</Badge>
+                                <Badge colorScheme="yellow" fontSize="0.65rem">
+                                  pending
+                                </Badge>
                               )}
                             </HStack>
                           </Td>
-                          <Td fontSize="xs">{formatErg(g.state.wagerNanoErg)}</Td>
                           <Td fontSize="xs">{formatErg(BigInt(g.box.value))}</Td>
+                          <Td fontSize="xs">{formatErg(g.state.wagerNanoErg)}</Td>
+                          <Td fontSize="xs" maxW="200px">
+                            {prizeSummary(g)}
+                          </Td>
                           <Td fontSize="xs">
                             <Code>{truncAddr(addrs.p1)}</Code>
                             {iAmP1 && <Badge ml={1}>you</Badge>}
                           </Td>
+                          <Td fontSize="xs">
+                            {addrs.p2 ? (
+                              <>
+                                <Code>{truncAddr(addrs.p2)}</Code>
+                                {iAmP2 && <Badge ml={1}>you</Badge>}
+                              </>
+                            ) : (
+                              <Text opacity={0.5}>—</Text>
+                            )}
+                          </Td>
                           <Td>
-                            <HStack spacing={1}>
+                            <HStack spacing={1} flexWrap="wrap">
+                              {showWatch && (
+                                <Button size="xs" variant="ghost" onClick={() => setWatchGame(g)}>
+                                  Watch
+                                </Button>
+                              )}
                               {canJoin && (
                                 <Button size="xs" onClick={() => void handleJoin(g)}>
                                   Join
@@ -924,7 +1065,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                               )}
                               {(iAmP1 || iAmP2) && g.phase === "ongoing" && (
                                 <Button size="xs" variant="outline" onClick={() => setActiveGame(g)}>
-                                  Open
+                                  Play
                                 </Button>
                               )}
                               {g.phase === "open" && iAmP1 && (
@@ -965,42 +1106,76 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
 
           {gameHistory.length > 0 && (
             <Stack spacing={2}>
-              <Heading size="sm">Recent finished xoxo</Heading>
-              <Text fontSize="xs" opacity={0.65}>
-                Last box snapshot before closing tx (not full move replay).
-              </Text>
+              <Stack spacing={0}>
+                <Heading size="sm">Recently ended</Heading>
+                <Text fontSize="xs" opacity={0.65}>
+                  Last on-chain snapshot before the closing tx — who won and pot size at settlement.
+                </Text>
+              </Stack>
               <Table size="sm">
                 <Thead>
                   <Tr>
-                    <Th>Phase</Th>
                     <Th>Block</Th>
-                    <Th>Tx</Th>
+                    <Th>Result</Th>
+                    <Th>Pot at end</Th>
+                    <Th>Wager</Th>
+                    <Th>Payout</Th>
+                    <Th>Winner / split</Th>
+                    <Th></Th>
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {gameHistory.slice(0, 10).map((h) => (
-                    <Tr key={h.spentTransactionId}>
-                      <Td>{h.phase}</Td>
-                      <Td>{h.settlementHeight}</Td>
-                      <Td>
-                        <HStack spacing={2}>
-                          <Button
-                            as="a"
-                            size="xs"
-                            variant="link"
-                            href={`${EXPLORER_TX}${h.spentTransactionId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {h.spentTransactionId.slice(0, 10)}…
-                          </Button>
-                          <Button size="xs" variant="outline" onClick={() => setHistoryInspect(h)}>
-                            Board
-                          </Button>
-                        </HStack>
-                      </Td>
-                    </Tr>
-                  ))}
+                  {gameHistory.slice(0, 15).map((h) => {
+                    const addrs = getSuperPlayerAddresses(h.state);
+                    const w = superWinner(h.state.boards);
+                    const who =
+                      h.phase === "won"
+                        ? w === CELL_X
+                          ? "X (creator)"
+                          : w === CELL_O
+                            ? "O (joiner)"
+                            : "—"
+                        : h.phase === "drawn"
+                          ? "50 / 50"
+                          : "—";
+                    return (
+                      <Tr key={h.spentTransactionId}>
+                        <Td fontSize="xs">{h.settlementHeight}</Td>
+                        <Td fontSize="xs">
+                          <Badge>{h.phase}</Badge>
+                        </Td>
+                        <Td fontSize="xs">{formatErg(BigInt(h.box.value))}</Td>
+                        <Td fontSize="xs">{formatErg(h.state.wagerNanoErg)}</Td>
+                        <Td fontSize="xs" maxW="220px">
+                          {historyPrizeSummary(h)}
+                        </Td>
+                        <Td fontSize="xs">
+                          <Text>{who}</Text>
+                          <Text fontSize="0.65rem" opacity={0.7}>
+                            {truncAddr(addrs.p1)} vs{" "}
+                            {addrs.p2 ? truncAddr(addrs.p2) : "—"}
+                          </Text>
+                        </Td>
+                        <Td>
+                          <HStack spacing={1}>
+                            <Button
+                              as="a"
+                              size="xs"
+                              variant="link"
+                              href={`${EXPLORER_TX}${h.spentTransactionId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Tx
+                            </Button>
+                            <Button size="xs" variant="outline" onClick={() => setHistoryInspect(h)}>
+                              Board
+                            </Button>
+                          </HStack>
+                        </Td>
+                      </Tr>
+                    );
+                  })}
                 </Tbody>
               </Table>
             </Stack>
@@ -1008,12 +1183,74 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
         </>
       )}
 
+      <SuperXoxoWatchModal
+        game={watchGame}
+        onClose={() => setWatchGame(null)}
+      />
+
       <SuperXoxoFinishedModal
         row={historyInspect}
         onClose={() => setHistoryInspect(null)}
         contractAddress={contractAddress}
       />
     </Stack>
+  );
+};
+
+interface SuperXoxoWatchModalProps {
+  game: DiscoveredSuperGame | null;
+  onClose: () => void;
+}
+
+const SuperXoxoWatchModal: React.FC<SuperXoxoWatchModalProps> = ({ game, onClose }) => {
+  if (!game) return null;
+  const g = superChainStateToGame(game.state);
+  const st = superStatusOf(g);
+  const addrs = getSuperPlayerAddresses(game.state);
+
+  return (
+    <Modal isOpen onClose={onClose} size="xl">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Watch game</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <Stack spacing={4}>
+            <HStack flexWrap="wrap" gap={2}>
+              <Badge>{outcomeLabel(game)}</Badge>
+              <Text fontSize="xs" opacity={0.7}>
+                Pot {formatErg(BigInt(game.box.value))} ERG · wager{" "}
+                {formatErg(game.state.wagerNanoErg)} each
+              </Text>
+            </HStack>
+            <Text fontSize="sm" opacity={0.85}>
+              {prizeSummary(game)}
+            </Text>
+            <Text fontSize="xs">
+              <strong>X:</strong> <Code fontSize="xs">{truncAddr(addrs.p1)}</Code>
+              {" · "}
+              <strong>O:</strong>{" "}
+              {addrs.p2 ? <Code fontSize="xs">{truncAddr(addrs.p2)}</Code> : "—"}
+            </Text>
+            <Flex justify="center" overflowX="auto">
+              <SuperTicTacToeBoard game={g} readOnly />
+            </Flex>
+            {st.kind === "ongoing" && (
+              <Alert status="info" borderRadius="md" fontSize="sm">
+                <AlertIcon />
+                <AlertDescription>
+                  Read-only view. Connect as a player and use <strong>Play</strong> in the
+                  table to move.
+                </AlertDescription>
+              </Alert>
+            )}
+          </Stack>
+        </ModalBody>
+        <ModalFooter>
+          <Button onClick={onClose}>Close</Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   );
 };
 
@@ -1070,10 +1307,20 @@ const SuperXoxoFinishedModal: React.FC<SuperXoxoFinishedModalProps> = ({
             </Flex>
             <Stack spacing={1} fontSize="sm">
               <Text>
-                <strong>Wager (each):</strong> {formatErg(row.state.wagerNanoErg)} ERG
+                <strong>Outcome:</strong>{" "}
+                {row.phase === "won" && superWinner(row.state.boards) === CELL_X && "X won meta"}
+                {row.phase === "won" && superWinner(row.state.boards) === CELL_O && "O won meta"}
+                {row.phase === "drawn" && "Draw (co-signed split)"}
+                {row.phase === "open" && "Cancelled"}
               </Text>
               <Text>
-                <strong>Pot (this box):</strong> {formatErg(BigInt(row.box.value))} ERG
+                <strong>Pot at settlement:</strong> {formatErg(BigInt(row.box.value))} ERG
+              </Text>
+              <Text>
+                <strong>Payout note:</strong> {historyPrizeSummary(row)}
+              </Text>
+              <Text>
+                <strong>Wager (each):</strong> {formatErg(row.state.wagerNanoErg)} ERG
               </Text>
               <Text>
                 <strong>X:</strong> <Code fontSize="xs">{truncAddr(addrs.p1)}</Code>
