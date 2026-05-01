@@ -18,6 +18,18 @@ import {
 } from "./ticTacToeLogic";
 
 describe("superTicTacToeLogic", () => {
+  it("alternates X and O globally across mini-boards (not per-sub-board)", () => {
+    let g = initialSuperGame();
+    g = applySuperMove(g, 0, 0); // X
+    expect(g.boards[0][0]).toBe(CELL_X);
+    g = applySuperMove(g, 0, 1); // O (same mini-board, next global move)
+    expect(g.boards[0][1]).toBe(CELL_O);
+    g = applySuperMove(g, 1, 0); // X — sent to sub 1
+    expect(g.boards[1][0]).toBe(CELL_X);
+    g = applySuperMove(g, 0, 2); // O
+    expect(g.boards[0][2]).toBe(CELL_O);
+  });
+
   it("starts with X to move and no constraint after first move sends to sub", () => {
     const g0 = initialSuperGame();
     expect(superStatusOf(g0)).toEqual({ kind: "ongoing", turn: "X" });
