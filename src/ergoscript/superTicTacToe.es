@@ -136,28 +136,31 @@
 
     val targetNext = playCell
     val tBase = targetNext * 9
+    // Match TS `metaOutcomeOfSub`: free move when sent-to mini-board is decided (win or cat's game).
+    val nbXWon =
+      (newBoard(tBase+0) == X && newBoard(tBase+1) == X && newBoard(tBase+2) == X) ||
+      (newBoard(tBase+3) == X && newBoard(tBase+4) == X && newBoard(tBase+5) == X) ||
+      (newBoard(tBase+6) == X && newBoard(tBase+7) == X && newBoard(tBase+8) == X) ||
+      (newBoard(tBase+0) == X && newBoard(tBase+3) == X && newBoard(tBase+6) == X) ||
+      (newBoard(tBase+1) == X && newBoard(tBase+4) == X && newBoard(tBase+7) == X) ||
+      (newBoard(tBase+2) == X && newBoard(tBase+5) == X && newBoard(tBase+8) == X) ||
+      (newBoard(tBase+0) == X && newBoard(tBase+4) == X && newBoard(tBase+8) == X) ||
+      (newBoard(tBase+2) == X && newBoard(tBase+4) == X && newBoard(tBase+6) == X)
+    val nbOWon =
+      (newBoard(tBase+0) == O && newBoard(tBase+1) == O && newBoard(tBase+2) == O) ||
+      (newBoard(tBase+3) == O && newBoard(tBase+4) == O && newBoard(tBase+5) == O) ||
+      (newBoard(tBase+6) == O && newBoard(tBase+7) == O && newBoard(tBase+8) == O) ||
+      (newBoard(tBase+0) == O && newBoard(tBase+3) == O && newBoard(tBase+6) == O) ||
+      (newBoard(tBase+1) == O && newBoard(tBase+4) == O && newBoard(tBase+7) == O) ||
+      (newBoard(tBase+2) == O && newBoard(tBase+5) == O && newBoard(tBase+8) == O) ||
+      (newBoard(tBase+0) == O && newBoard(tBase+4) == O && newBoard(tBase+8) == O) ||
+      (newBoard(tBase+2) == O && newBoard(tBase+4) == O && newBoard(tBase+6) == O)
+    val nbFull =
+      newBoard(tBase+0) != empty && newBoard(tBase+1) != empty && newBoard(tBase+2) != empty &&
+      newBoard(tBase+3) != empty && newBoard(tBase+4) != empty && newBoard(tBase+5) != empty &&
+      newBoard(tBase+6) != empty && newBoard(tBase+7) != empty && newBoard(tBase+8) != empty
     val nextTargetDecided =
-      (newBoard(tBase+0) != empty && newBoard(tBase+1) != empty && newBoard(tBase+2) != empty &&
-       newBoard(tBase+3) != empty && newBoard(tBase+4) != empty && newBoard(tBase+5) != empty &&
-       newBoard(tBase+6) != empty && newBoard(tBase+7) != empty && newBoard(tBase+8) != empty) &&
-      !(
-        (newBoard(tBase+0) == X && newBoard(tBase+1) == X && newBoard(tBase+2) == X) ||
-        (newBoard(tBase+3) == X && newBoard(tBase+4) == X && newBoard(tBase+5) == X) ||
-        (newBoard(tBase+6) == X && newBoard(tBase+7) == X && newBoard(tBase+8) == X) ||
-        (newBoard(tBase+0) == X && newBoard(tBase+3) == X && newBoard(tBase+6) == X) ||
-        (newBoard(tBase+1) == X && newBoard(tBase+4) == X && newBoard(tBase+7) == X) ||
-        (newBoard(tBase+2) == X && newBoard(tBase+5) == X && newBoard(tBase+8) == X) ||
-        (newBoard(tBase+0) == X && newBoard(tBase+4) == X && newBoard(tBase+8) == X) ||
-        (newBoard(tBase+2) == X && newBoard(tBase+4) == X && newBoard(tBase+6) == X) ||
-        (newBoard(tBase+0) == O && newBoard(tBase+1) == O && newBoard(tBase+2) == O) ||
-        (newBoard(tBase+3) == O && newBoard(tBase+4) == O && newBoard(tBase+5) == O) ||
-        (newBoard(tBase+6) == O && newBoard(tBase+7) == O && newBoard(tBase+8) == O) ||
-        (newBoard(tBase+0) == O && newBoard(tBase+3) == O && newBoard(tBase+6) == O) ||
-        (newBoard(tBase+1) == O && newBoard(tBase+4) == O && newBoard(tBase+7) == O) ||
-        (newBoard(tBase+2) == O && newBoard(tBase+5) == O && newBoard(tBase+8) == O) ||
-        (newBoard(tBase+0) == O && newBoard(tBase+4) == O && newBoard(tBase+8) == O) ||
-        (newBoard(tBase+2) == O && newBoard(tBase+4) == O && newBoard(tBase+6) == O)
-      )
+      nbXWon || nbOWon || (nbFull && !(nbXWon) && !(nbOWon))
 
     val expectConstr = if (nextTargetDecided) FREE else targetNext.toLong
 
