@@ -1,12 +1,16 @@
 import React, { useState } from "react";
 import {
+  Accordion,
+  AccordionButton,
+  AccordionIcon,
+  AccordionItem,
+  AccordionPanel,
   Alert,
   AlertDescription,
   AlertIcon,
   Badge,
   Box,
   Button,
-  Divider,
   Flex,
   HStack,
   Heading,
@@ -27,8 +31,7 @@ import SuperTicTacToeBoard from "./SuperTicTacToeBoard";
 import SuperTicTacToeChainPanel from "./SuperTicTacToeChainPanel";
 
 /**
- * Ultimate (Super) Tic Tac Toe — local two-player, same browser.
- * Nine nested boards; your move picks the next sub-board for your opponent.
+ * xoxo page: live on-chain viewer (always); local practice collapsed under accordion.
  */
 export const SuperTicTacToePage: React.FC = () => {
   const { colorMode } = useColorMode();
@@ -70,70 +73,64 @@ export const SuperTicTacToePage: React.FC = () => {
       : `You must play in mini-board ${game.constraintSub + 1} (highlighted).`;
 
   return (
-    <Box p={{ base: 4, md: 6 }} maxW="960px" mx="auto">
+    <Box p={{ base: 4, md: 6 }} maxW="1100px" mx="auto">
       <Stack spacing={5}>
         <Stack spacing={1}>
           <Heading size="lg">xoxo · Super Tic Tac Toe</Heading>
           <Text fontSize="sm" opacity={0.8}>
-            Win three mini-boards in a row on the big grid. After each move, your
-            opponent must play in the mini-board matching your cell — unless that
-            board is already finished, then they get a free move anywhere.
+            On-chain Ultimate Tic Tac Toe: wagered games, live lobby, and recent
+            settlements. Win three mini-boards in a row on the meta grid; each move
+            picks your opponent&apos;s next sub-board unless it is already finished.
           </Text>
           <Button as={RouterLink} to="/games/tic-tac-toe" size="sm" variant="link" alignSelf="flex-start">
             Classic 3×3 on-chain tic-tac-toe →
           </Button>
         </Stack>
 
-        <Box
-          borderWidth="1px"
-          borderRadius="md"
-          p={5}
-          borderColor={colorMode === "light" ? "gray.200" : "whiteAlpha.300"}
-        >
-          <Stack spacing={4}>
-            <HStack justify="space-between" align="center" flexWrap="wrap" gap={2}>
-              <Heading size="sm">Local play</Heading>
-              <Badge colorScheme={statusColor}>{statusLabel}</Badge>
-            </HStack>
+        <SuperTicTacToeChainPanel />
 
-            <Alert status="info" borderRadius="md" fontSize="sm">
-              <AlertIcon />
-              <AlertDescription>
-                {constraintHint} Two players at this browser, no wallet. For
-                wagered games on Ergo, use the on-chain section below (same flow as
-                classic tic-tac-toe: create, join, one tx per move, claim when you
-                win the meta board).
-              </AlertDescription>
-            </Alert>
-
-            <Flex justify="center" overflowX="auto">
-              <SuperTicTacToeBoard game={game} onPlay={onPlay} />
-            </Flex>
-
-            <HStack justify="center">
-              <Button size="sm" variant="outline" onClick={reset}>
-                Reset game
-              </Button>
-            </HStack>
-          </Stack>
-        </Box>
-
-        <Divider />
-
-        <Stack spacing={3}>
-          <Heading size="md">On-chain xoxo</Heading>
-          {ergoAddress ? (
-            <SuperTicTacToeChainPanel />
-          ) : (
-            <Alert status="info" borderRadius="md" fontSize="sm">
-              <AlertIcon />
-              <AlertDescription>
-                Connect a wallet from the dashboard to create or join real Ultimate
-                games (separate contract from standard 3×3 tic-tac-toe).
-              </AlertDescription>
-            </Alert>
-          )}
-        </Stack>
+        <Accordion allowToggle reduceMotion>
+          <AccordionItem
+            borderWidth="1px"
+            borderRadius="md"
+            borderColor={colorMode === "light" ? "gray.200" : "whiteAlpha.300"}
+          >
+            <h2>
+              <AccordionButton py={3} _expanded={{ bg: colorMode === "light" ? "gray.50" : "whiteAlpha.50" }}>
+                <Box flex="1" textAlign="left">
+                  <HStack spacing={2}>
+                    <Text fontWeight="semibold">Practice xoxo²</Text>
+                    <Badge colorScheme={statusColor}>{statusLabel}</Badge>
+                  </HStack>
+                  <Text fontSize="xs" opacity={0.65} mt={1}>
+                    Offline two-player at this browser — no wallet, no ERG.
+                  </Text>
+                </Box>
+                <AccordionIcon />
+              </AccordionButton>
+            </h2>
+            <AccordionPanel pb={4} pt={0}>
+              <Stack spacing={4}>
+                <Alert status="info" borderRadius="md" fontSize="sm">
+                  <AlertIcon />
+                  <AlertDescription>
+                    {constraintHint} Use this only to learn the UI or rules; real prizes
+                    and opponents are in the live section above
+                    {ergoAddress ? "" : " (connect a wallet to create or join games)"}.
+                  </AlertDescription>
+                </Alert>
+                <Flex justify="center" overflowX="auto">
+                  <SuperTicTacToeBoard game={game} onPlay={onPlay} />
+                </Flex>
+                <HStack justify="center">
+                  <Button size="sm" variant="outline" onClick={reset}>
+                    Reset practice board
+                  </Button>
+                </HStack>
+              </Stack>
+            </AccordionPanel>
+          </AccordionItem>
+        </Accordion>
       </Stack>
     </Box>
   );

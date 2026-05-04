@@ -32,6 +32,36 @@ import {
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 
+/**
+ * Lobby boxes from GraphQL lack fields wasm expects (e.g. `assets`), which
+ * breaks ErgoBoxes.from_boxes_json when signing join/move/etc.
+ * Re-fetch the full box JSON by id (short URL) before building txs.
+ */
+const fetchExplorerBoxById = async (boxId: string): Promise<any> => {
+  const res = await fetch(`${ERGO_API}/boxes/${encodeURIComponent(boxId)}`);
+  if (!res.ok) {
+    throw new Error(`Game box fetch HTTP ${res.status}`);
+  }
+  return res.json();
+};
+
+const ensureFullGameBox = async (box: any): Promise<any> => {
+  const id = box?.boxId;
+  if (!id || typeof id !== "string") {
+    return normalizeExplorerBox(box);
+  }
+  const assets = box?.assets;
+  const looksLikeRest =
+    Array.isArray(assets) &&
+    typeof box.transactionId === "string" &&
+    typeof box.index === "number";
+  if (looksLikeRest) {
+    return normalizeExplorerBox(box);
+  }
+  const full = await fetchExplorerBoxById(id);
+  return normalizeExplorerBox(full);
+};
+
 const normalizeExplorerBox = (box: any): any => {
   const regs = box?.additionalRegisters;
   if (!regs || typeof regs !== "object") return box;
@@ -153,7 +183,7 @@ export const buildSuperJoinGameTx = async (params: {
     throw new Error("You can't join your own game.");
   }
 
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
   const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(joinerAddress));
   if (funding.length === 0) {
     throw new Error("No unspent boxes at your address to fund the join.");
@@ -225,7 +255,7 @@ export const buildSuperMoveTx = async (params: {
 }) => {
   const { currentGameState, moverAddress, moverPubKeyHex, subIndex, cellIndex } =
     params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game hasn't been joined yet.");
@@ -299,7 +329,7 @@ export const buildSuperCancelGameTx = async (params: {
   creatorPubKeyHex: string;
 }) => {
   const { currentGameState, creatorAddress, creatorPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("Game is already joined; cancel is no longer allowed.");
   }
@@ -334,7 +364,7 @@ export const buildSuperClaimWinTx = async (params: {
   winnerPubKeyHex: string;
 }) => {
   const { currentGameState, winnerAddress, winnerPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
   const w = superWinner(currentGameState.boards);
   if (w === null) {
     throw new Error("No meta-board winner yet.");
@@ -378,7 +408,7 @@ export const buildSuperDrawSplitTx = async (params: {
   signerPubKeyHex: string;
 }) => {
   const { currentGameState, p1Address, p2Address, signerPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined.");
   }
