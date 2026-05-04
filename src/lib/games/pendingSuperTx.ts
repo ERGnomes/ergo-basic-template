@@ -5,7 +5,14 @@
 
 import type { SuperBoard } from "./superTicTacToeLogic";
 
-export type PendingSuperKind = "create" | "join" | "move" | "cancel" | "claim" | "draw";
+export type PendingSuperKind =
+  | "create"
+  | "join"
+  | "move"
+  | "cancel"
+  | "claim"
+  | "draw"
+  | "idle";
 
 export interface PendingSuperTx {
   id: string;
@@ -17,6 +24,7 @@ export interface PendingSuperTx {
     p1PubKeyHex: string;
     p2PubKeyHex: string;
     wagerNanoErg: string;
+    lastActiveHeight?: number;
   } | null;
   predictedPhase: "open" | "ongoing" | "won" | "drawn" | "spent";
   follow: {
@@ -104,7 +112,12 @@ export const reconcilePendingSuper = (snap: SuperChainSnapshot): void => {
       ? snap.unspentTriples.has(followKey)
       : false;
 
-    if (p.kind === "cancel" || p.kind === "claim" || p.kind === "draw") {
+    if (
+      p.kind === "cancel" ||
+      p.kind === "claim" ||
+      p.kind === "draw" ||
+      p.kind === "idle"
+    ) {
       if (spentDisappeared) continue;
       surviving.push(p);
     } else if (p.kind === "create") {

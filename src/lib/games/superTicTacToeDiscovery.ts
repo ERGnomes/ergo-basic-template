@@ -4,6 +4,9 @@
  * Uses GraphQL POST (ergoTree in JSON body) instead of REST GET byErgoTree,
  * because the super contract ErgoTree hex is ~7.6k characters — GET URLs hit
  * browser/proxy limits and fail with NetworkError.
+ *
+ * Queries both the **current** compiled tree and **legacy** trees (see
+ * `gameLegacyTrees.ts`) so in-flight boxes remain visible after contract upgrades.
  */
 
 import {
@@ -11,6 +14,7 @@ import {
   parseSuperGameBox,
   type SuperChainGameState,
 } from "./superTicTacToeContract";
+import { SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX } from "./gameLegacyTrees";
 import { superMetaFull, superWinner } from "./superTicTacToeLogic";
 import {
   fetchBoxesByErgoTreeGql,
@@ -61,15 +65,27 @@ const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredSuperGame | null => {
   return { box, state, phase, isJoined };
 };
 
-const treeHex = (): string => getSuperGameErgoTreeHex();
+/** Current + legacy ErgoTree hex strings for merged discovery. */
+const superTreeHexes = (): string[] => [
+  getSuperGameErgoTreeHex(),
+  SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX,
+];
 
 export const fetchAllSuperGames = async (): Promise<DiscoveredSuperGame[]> => {
-  const rows = await fetchBoxesByErgoTreeGql(treeHex(), { spent: false, take: 100 });
   const games: DiscoveredSuperGame[] = [];
-  for (const row of rows) {
-    const box = gqlBoxToExplorerLike(row);
-    const g = boxToDiscovered(box);
-    if (g) games.push(g);
+  const seen = new Set<string>();
+
+  for (const hex of superTreeHexes()) {
+    const rows = await fetchBoxesByErgoTreeGql(hex, { spent: false, take: 100 });
+    for (const row of rows) {
+      const box = gqlBoxToExplorerLike(row);
+      if (seen.has(box.boxId)) continue;
+      const g = boxToDiscovered(box);
+      if (g) {
+        seen.add(box.boxId);
+        games.push(g);
+      }
+    }
   }
   return games;
 };
@@ -82,25 +98,32 @@ export const fetchOpenSuperGames = async (): Promise<DiscoveredSuperGame[]> => {
 export const fetchRecentSuperGameHistory = async (
   limit = 30
 ): Promise<SuperGameHistorySnapshot[]> => {
-  const rows = await fetchBoxesByErgoTreeGql(treeHex(), { spent: true, take: limit });
   const out: SuperGameHistorySnapshot[] = [];
-  for (const row of rows) {
-    const box = gqlBoxToExplorerLike(row);
-    const g = boxToDiscovered(box);
-    if (!g) continue;
-    const spent = box.spentTransactionId;
-    if (!spent || typeof spent !== "string") continue;
-    const h = box.settlementHeight;
-    if (typeof h !== "number") continue;
-    if (g.phase === "ongoing") continue;
-    out.push({
-      box: g.box,
-      state: g.state,
-      phase: g.phase,
-      isJoined: g.isJoined,
-      settlementHeight: h,
-      spentTransactionId: spent,
-    });
+  const seen = new Set<string>();
+
+  for (const hex of superTreeHexes()) {
+    const rows = await fetchBoxesByErgoTreeGql(hex, { spent: true, take: limit });
+    for (const row of rows) {
+      const box = gqlBoxToExplorerLike(row);
+      const g = boxToDiscovered(box);
+      if (!g) continue;
+      const spent = box.spentTransactionId;
+      if (!spent || typeof spent !== "string") continue;
+      const h = box.settlementHeight;
+      if (typeof h !== "number") continue;
+      if (g.phase === "ongoing") continue;
+      const key = `${box.boxId}|${spent}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        box: g.box,
+        state: g.state,
+        phase: g.phase,
+        isJoined: g.isJoined,
+        settlementHeight: h,
+        spentTransactionId: spent,
+      });
+    }
   }
   out.sort((a, b) => b.settlementHeight - a.settlementHeight);
   return out.slice(0, limit);

@@ -25,6 +25,10 @@ import {
   type SuperChainGameState,
 } from "./superTicTacToeContract";
 import { CELL_X } from "./ticTacToeLogic";
+import {
+  IDLE_REFUND_BLOCKS,
+  IDLE_REFUND_FEE_ALLOWANCE_NANO,
+} from "./gameIdleConstants";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 
@@ -112,6 +116,7 @@ const emptySuperChainState = (
   p1PubKeyHex: p1,
   p2PubKeyHex: p2,
   wagerNanoErg: wager,
+  lastActiveHeight: 0,
 });
 
 export const buildSuperCreateGameTx = async (params: {
@@ -131,11 +136,14 @@ export const buildSuperCreateGameTx = async (params: {
 
   const gameBoxValue = wagerNanoErg + SAFE_MIN_BOX_VALUE;
 
-  const gameState = emptySuperChainState(
-    creatorPubKeyHex,
-    creatorPubKeyHex,
-    wagerNanoErg
-  );
+  const gameState: SuperChainGameState = {
+    ...emptySuperChainState(
+      creatorPubKeyHex,
+      creatorPubKeyHex,
+      wagerNanoErg
+    ),
+    lastActiveHeight: height,
+  };
   const regs = encodeSuperAllRegisters(gameState);
 
   const out = new OutputBuilder(
@@ -147,6 +155,7 @@ export const buildSuperCreateGameTx = async (params: {
     R6: regs.R6 as any,
     R7: regs.R7 as any,
     R8: regs.R8 as any,
+    R9: regs.R9 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -184,6 +193,7 @@ export const buildSuperJoinGameTx = async (params: {
   const newState: SuperChainGameState = {
     ...currentGameState,
     p2PubKeyHex: joinerPubKeyHex,
+    lastActiveHeight: height,
   };
   const regs = encodeSuperAllRegisters(newState);
 
@@ -199,6 +209,7 @@ export const buildSuperJoinGameTx = async (params: {
     R6: regs.R6 as any,
     R7: regs.R7 as any,
     R8: regs.R8 as any,
+    R9: regs.R9 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -231,6 +242,7 @@ const superGameToChain = (
   p1PubKeyHex: p1,
   p2PubKeyHex: p2,
   wagerNanoErg: wager,
+  lastActiveHeight: 0,
 });
 
 export const buildSuperMoveTx = async (params: {
@@ -269,16 +281,20 @@ export const buildSuperMoveTx = async (params: {
   }
 
   const nextGame = applySuperMove(game, subIndex, cellIndex);
+  const height = await fetchCurrentHeight();
   const nextState = superGameToChain(
     nextGame,
     currentGameState.p1PubKeyHex,
     currentGameState.p2PubKeyHex,
     currentGameState.wagerNanoErg
   );
-  const regs = encodeSuperAllRegisters(nextState);
+  const nextWithClock: SuperChainGameState = {
+    ...nextState,
+    lastActiveHeight: height,
+  };
+  const regs = encodeSuperAllRegisters(nextWithClock);
 
   const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(moverAddress));
-  const height = await fetchCurrentHeight();
 
   const out = new OutputBuilder(
     BigInt(currentGameBox.value),
@@ -289,6 +305,7 @@ export const buildSuperMoveTx = async (params: {
     R6: regs.R6 as any,
     R7: regs.R7 as any,
     R8: regs.R8 as any,
+    R9: regs.R9 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -437,6 +454,98 @@ export const buildSuperDrawSplitTx = async (params: {
     .toEIP12Object();
 
   return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
+};
+
+export const buildSuperIdleRefundTx = async (params: {
+  currentGameBox: any;
+  currentGameState: SuperChainGameState;
+  signerPubKeyHex: string;
+  signerAddress: string;
+}) => {
+  const { currentGameState, signerPubKeyHex, signerAddress } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+
+  if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
+    throw new Error("Game is not joined yet.");
+  }
+  if (superWinner(currentGameState.boards) !== null) {
+    throw new Error("Game already has a meta winner — use claim.");
+  }
+  if (superMetaFull(currentGameState.boards)) {
+    throw new Error("Meta board full — use draw split if drawn.");
+  }
+
+  if (currentGameState.lastActiveHeight <= 0) {
+    throw new Error(
+      "This game uses a legacy contract without idle refund; upgrade path unavailable on-chain."
+    );
+  }
+
+  const height = await fetchCurrentHeight();
+  if (height < currentGameState.lastActiveHeight + IDLE_REFUND_BLOCKS) {
+    throw new Error(
+      `Opponent still has until block ${
+        currentGameState.lastActiveHeight + IDLE_REFUND_BLOCKS
+      } (chain is ${height}) before you can refund.`
+    );
+  }
+
+  const xTurn = totalMoves(currentGameState.boards) % 2 === 0;
+  const waiterPk = xTurn
+    ? currentGameState.p2PubKeyHex
+    : currentGameState.p1PubKeyHex;
+  if (signerPubKeyHex !== waiterPk) {
+    throw new Error(
+      "Only the player waiting for a move can refund after the idle period."
+    );
+  }
+
+  const p1Addr = pubkeyToMainnetAddress(currentGameState.p1PubKeyHex);
+  const p2Addr = pubkeyToMainnetAddress(currentGameState.p2PubKeyHex);
+
+  const gameValue = BigInt(currentGameBox.value);
+  const fee = RECOMMENDED_MIN_FEE_VALUE;
+  const potAfterFee = gameValue - fee;
+  if (potAfterFee <= BigInt(0)) {
+    throw new Error("Box value too low to pay network fee.");
+  }
+
+  const minEach = currentGameState.wagerNanoErg - IDLE_REFUND_FEE_ALLOWANCE_NANO;
+  if (minEach <= BigInt(0)) {
+    throw new Error("Wager too small for the contract's refund formula.");
+  }
+
+  const half = potAfterFee / BigInt(2);
+  const rem = potAfterFee % BigInt(2);
+  const toP1 = half + rem;
+  const toP2 = half;
+  if (toP1 < minEach || toP2 < minEach) {
+    throw new Error(
+      "Pot cannot satisfy the contract after fees — try again or contact support."
+    );
+  }
+  if (toP1 < SAFE_MIN_BOX_VALUE || toP2 < SAFE_MIN_BOX_VALUE) {
+    throw new Error("Refund outputs would be below the minimum box value.");
+  }
+
+  const out1 = new OutputBuilder(toP1, ErgoAddress.fromBase58(p1Addr));
+  const out2 = new OutputBuilder(toP2, ErgoAddress.fromBase58(p2Addr));
+
+  const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(signerAddress));
+
+  const unsigned = new TransactionBuilder(height)
+    .from([currentGameBox, ...funding])
+    .to(out1)
+    .to(out2)
+    .sendChangeTo(signerAddress)
+    .payFee(fee)
+    .build()
+    .toEIP12Object();
+
+  return {
+    unsignedEip12: unsigned,
+    inputBoxes: [currentGameBox, ...funding],
+  };
 };
 
 export const getSuperPlayerAddresses = (state: SuperChainGameState) => ({

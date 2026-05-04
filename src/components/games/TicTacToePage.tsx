@@ -50,6 +50,8 @@ import {
   winnerOf,
   CELL_X,
   CELL_O,
+  applyMove,
+  isXTurn,
 } from "../../lib/games/ticTacToeLogic";
 import {
   getGameP2SAddress,
@@ -57,6 +59,7 @@ import {
 import {
   DiscoveredGame,
   fetchAllGames,
+  fetchErgoTipHeight,
   fetchRecentGameHistory,
   GameHistorySnapshot,
 } from "../../lib/games/ticTacToeDiscovery";
@@ -65,6 +68,7 @@ import {
   buildClaimWinTx,
   buildCreateGameTx,
   buildDrawSplitTx,
+  buildIdleRefundTx,
   buildJoinGameTx,
   buildMoveTx,
   getPlayerAddresses,
@@ -87,7 +91,7 @@ import {
   removePendingTx,
   subscribePending,
 } from "../../lib/games/pendingTx";
-import { applyMove } from "../../lib/games/ticTacToeLogic";
+import { IDLE_REFUND_BLOCKS } from "../../lib/games/gameIdleConstants";
 import { recordErgoTxActivity } from "../../lib/ergoTxActivity";
 import {
   gameRecordFromHistory,
@@ -129,6 +133,7 @@ export const TicTacToePage: React.FC = () => {
   const [myPubKey, setMyPubKey] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingTx[]>(() => getPendingTxs());
   const [practiceModeOpen, setPracticeModeOpen] = useState(false);
+  const [tipHeight, setTipHeight] = useState(0);
 
   // Subscribe to pending-tx changes anywhere in the app (cross-tab,
   // in-tab re-renders after add / remove).
@@ -183,6 +188,11 @@ export const TicTacToePage: React.FC = () => {
       ]);
       setGames(out);
       setGameHistory(hist);
+      try {
+        setTipHeight(await fetchErgoTipHeight());
+      } catch {
+        // non-fatal — idle refund button uses chain height when available
+      }
       // Reconcile pending ops against the fresh chain snapshot so
       // confirmed ops disappear automatically.
       const unspentBoxIds = new Set(out.map((g) => g.box.boxId));
@@ -254,6 +264,7 @@ export const TicTacToePage: React.FC = () => {
               p1PubKeyHex: p.predicted.p1PubKeyHex,
               p2PubKeyHex: p.predicted.p2PubKeyHex,
               wagerNanoErg: wagerBig,
+              lastActiveHeight: p.predicted.lastActiveHeight ?? 0,
             },
             phase:
               p.predictedPhase === "spent" ? existing.phase : p.predictedPhase,
@@ -276,6 +287,7 @@ export const TicTacToePage: React.FC = () => {
               p1PubKeyHex: p.predicted.p1PubKeyHex,
               p2PubKeyHex: p.predicted.p2PubKeyHex,
               wagerNanoErg: wagerBig,
+              lastActiveHeight: p.predicted.lastActiveHeight ?? 0,
             },
             phase: p.predictedPhase === "spent" ? "open" : p.predictedPhase,
             isJoined:
@@ -437,6 +449,7 @@ export const TicTacToePage: React.FC = () => {
             p1PubKeyHex: myPubKey,
             p2PubKeyHex: myPubKey,
             wagerNanoErg: wagerNanoErg.toString(),
+            lastActiveHeight: await fetchErgoTipHeight(),
           },
           predictedPhase: "open",
           follow: {
@@ -470,6 +483,7 @@ export const TicTacToePage: React.FC = () => {
           joinerAddress: ergoAddress,
           joinerPubKeyHex: myPubKey,
         });
+        const la = await fetchErgoTipHeight();
         const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
           kind: "join",
           spentBoxId: game.box.boxId,
@@ -478,6 +492,7 @@ export const TicTacToePage: React.FC = () => {
             p1PubKeyHex: game.state.p1PubKeyHex,
             p2PubKeyHex: myPubKey,
             wagerNanoErg: game.state.wagerNanoErg.toString(),
+            lastActiveHeight: la,
           },
           predictedPhase: "ongoing",
           follow: {
@@ -494,6 +509,7 @@ export const TicTacToePage: React.FC = () => {
             state: {
               ...game.state,
               p2PubKeyHex: myPubKey,
+              lastActiveHeight: la,
             },
             isJoined: true,
             phase: "ongoing",
@@ -524,6 +540,7 @@ export const TicTacToePage: React.FC = () => {
           cell,
         });
         const predictedBoard = applyMove(activeGame.state.board, cell);
+        const la = await fetchErgoTipHeight();
         const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
           kind: "move",
           spentBoxId: activeGame.box.boxId,
@@ -532,6 +549,7 @@ export const TicTacToePage: React.FC = () => {
             p1PubKeyHex: activeGame.state.p1PubKeyHex,
             p2PubKeyHex: activeGame.state.p2PubKeyHex,
             wagerNanoErg: activeGame.state.wagerNanoErg.toString(),
+            lastActiveHeight: la,
           },
           predictedPhase: "ongoing",
           follow: {
@@ -691,6 +709,46 @@ export const TicTacToePage: React.FC = () => {
     });
   };
 
+  const handleIdleRefund = async (gameOverride?: DiscoveredGame | null) => {
+    const g = gameOverride ?? activeGame;
+    if (!g || !ergoAddress || !myPubKey) return;
+    await withBusy("Building idle refund transaction…", async () => {
+      try {
+        const tx = await buildIdleRefundTx({
+          currentGameBox: g.box,
+          currentGameState: g.state,
+          signerPubKeyHex: myPubKey,
+          signerAddress: ergoAddress,
+        });
+        const pendingTemplate: Omit<PendingTx, "id" | "submittedAt"> = {
+          kind: "idle",
+          spentBoxId: g.box.boxId,
+          predicted: null,
+          predictedPhase: "spent",
+          follow: {
+            p1PubKeyHex: g.state.p1PubKeyHex,
+            p2PubKeyHex: g.state.p2PubKeyHex,
+            wagerNanoErg: g.state.wagerNanoErg.toString(),
+          },
+          description: "Idle refund — return wagers to both players",
+        };
+        const ok = await signAndSubmitTx(tx, pendingTemplate);
+        if (ok) {
+          setTimeout(refreshGames, 3000);
+          setTimeout(() => setActiveGame(null), 3000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't refund",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 8000,
+          isClosable: true,
+        });
+      }
+    });
+  };
+
   // ------------------------------------------------------------------
   // Render.
   // ------------------------------------------------------------------
@@ -730,10 +788,12 @@ export const TicTacToePage: React.FC = () => {
         <Stack spacing={1}>
           <AlertTitle>Unaudited smart contract</AlertTitle>
           <AlertDescription fontSize="sm">
-            Enforces strict two-player turns, winner-takes-all, and
-            creator-cancel, but has NO abandonment timeout — if your
-            opponent stops playing, your wager is stuck until they
-            sign again. Test with tiny wagers first.
+            Enforces strict two-player turns, winner-takes-all, creator-cancel,
+            and an on-chain idle path: if nobody moves for{" "}
+            {IDLE_REFUND_BLOCKS.toLocaleString()} blocks (~one week at ~2
+            min/block), the player waiting for a move may refund both wagers
+            to plain wallet outputs. Games created before this upgrade cannot
+            use idle refund. Test with tiny wagers first.
           </AlertDescription>
         </Stack>
       </Alert>
@@ -805,12 +865,15 @@ export const TicTacToePage: React.FC = () => {
                 (p.follow.p2PubKeyHex === activeGame.state.p2PubKeyHex ||
                   p.kind === "cancel" ||
                   p.kind === "claim" ||
-                  p.kind === "draw")
+                  p.kind === "draw" ||
+                  p.kind === "idle")
             )}
             onMove={handleMove}
             onCancel={handleCancel}
             onClaimWin={() => void handleClaimWin()}
             onDrawSplit={() => void handleDrawSplit()}
+            onIdleRefund={() => void handleIdleRefund()}
+            tipHeight={tipHeight}
             onBack={() => setActiveGame(null)}
           />
         ) : (
@@ -842,6 +905,8 @@ export const TicTacToePage: React.FC = () => {
               onOpen={setActiveGame}
               onClaimFromLobby={(g) => void handleClaimWin(g)}
               onDrawSplitFromLobby={(g) => void handleDrawSplit(g)}
+              onIdleRefundFromLobby={(g) => void handleIdleRefund(g)}
+              tipHeight={tipHeight}
               busy={busy}
               pendingBoxIdsBeingSpent={pendingBoxIdsBeingSpent}
             />
@@ -1262,6 +1327,8 @@ interface GameListProps {
   onOpen: (g: DiscoveredGame) => void;
   onClaimFromLobby: (g: DiscoveredGame) => void;
   onDrawSplitFromLobby: (g: DiscoveredGame) => void;
+  onIdleRefundFromLobby: (g: DiscoveredGame) => void;
+  tipHeight: number;
   busy: boolean;
   pendingBoxIdsBeingSpent: Set<string>;
 }
@@ -1276,6 +1343,8 @@ const GameList: React.FC<GameListProps> = ({
   onOpen,
   onClaimFromLobby,
   onDrawSplitFromLobby,
+  onIdleRefundFromLobby,
+  tipHeight,
   busy,
   pendingBoxIdsBeingSpent,
 }) => {
@@ -1348,6 +1417,17 @@ const GameList: React.FC<GameListProps> = ({
                   ((w === CELL_X && iAmP1) || (w === CELL_O && iAmP2));
                 const canDrawFromLobby =
                   g.phase === "drawn" && iAmParticipant && !isOptimistic;
+                const waiterPk = isXTurn(g.state.board)
+                  ? g.state.p2PubKeyHex
+                  : g.state.p1PubKeyHex;
+                const canIdleRefundFromLobby =
+                  g.phase === "ongoing" &&
+                  iAmParticipant &&
+                  myPubKey === waiterPk &&
+                  g.state.lastActiveHeight > 0 &&
+                  tipHeight > 0 &&
+                  tipHeight >= g.state.lastActiveHeight + IDLE_REFUND_BLOCKS &&
+                  !isOptimistic;
                 return (
                   <Tr key={g.box.boxId}>
                     <Td>
@@ -1434,6 +1514,16 @@ const GameList: React.FC<GameListProps> = ({
                             Sign draw
                           </Button>
                         )}
+                        {canIdleRefundFromLobby && (
+                          <Button
+                            size="xs"
+                            colorScheme="orange"
+                            onClick={() => onIdleRefundFromLobby(g)}
+                            isDisabled={busy}
+                          >
+                            Refund (idle)
+                          </Button>
+                        )}
                       </HStack>
                     </Td>
                   </Tr>
@@ -1455,10 +1545,12 @@ interface ActiveViewProps {
   busy: boolean;
   busyLabel: string | null;
   pending: PendingTx[];
+  tipHeight: number;
   onMove: (cell: number) => void;
   onCancel: () => void;
   onClaimWin: () => void;
   onDrawSplit: () => void;
+  onIdleRefund: () => void;
   onBack: () => void;
 }
 
@@ -1468,10 +1560,12 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   busy,
   busyLabel,
   pending,
+  tipHeight,
   onMove,
   onCancel,
   onClaimWin,
   onDrawSplit,
+  onIdleRefund,
   onBack,
 }) => {
   const { colorMode } = useColorMode();
@@ -1509,6 +1603,19 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
   const canDrawSplit =
     status.kind === "drawn" && (iAmP1 || iAmP2);
   const canCancel = status.kind === "open" && iAmP1;
+  const waiterPk =
+    status.kind === "ongoing"
+      ? isXTurn(game.state.board)
+        ? game.state.p2PubKeyHex
+        : game.state.p1PubKeyHex
+      : null;
+  const canIdleRefund =
+    status.kind === "ongoing" &&
+    myPubKey !== null &&
+    waiterPk === myPubKey &&
+    game.state.lastActiveHeight > 0 &&
+    tipHeight > 0 &&
+    tipHeight >= game.state.lastActiveHeight + IDLE_REFUND_BLOCKS;
 
   return (
     <Box
@@ -1613,6 +1720,11 @@ const ActiveGameView: React.FC<ActiveViewProps> = ({
           {canDrawSplit && (
             <Button colorScheme="purple" variant="solid" onClick={onDrawSplit} isLoading={busy}>
               Sign draw split (50/50 + fee)
+            </Button>
+          )}
+          {canIdleRefund && (
+            <Button colorScheme="orange" variant="solid" onClick={onIdleRefund} isLoading={busy}>
+              Refund both wagers (opponent idle)
             </Button>
           )}
         </HStack>

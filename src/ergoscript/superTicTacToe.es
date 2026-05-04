@@ -1,23 +1,28 @@
 {
   // Ultimate (Super) Tic Tac Toe — same economic model as ticTacToe.es:
-  // R4: Coll[Byte] length 81 — nine 3×3 boards flattened (sub0 cells 0..8, sub1, …)
+  // R4: Coll[Byte] length 81 — nine 3×3 boards flattened
   // R5: GroupElement — player 1 (X)
   // R6: GroupElement — player 2 (O); equals R5 while open
   // R7: Long — wager per player (nanoErgs)
-  // R8: Long — next sub-board: -1 = play anywhere legal; 0..8 = must play in that sub
+  // R8: Long — block height of last on-chain activity (create / join / move)
+  // R9: Long — next sub-board: -1 = play anywhere; 0..8 = forced sub
   //
-  // Branches: CANCEL, JOIN, MOVE, CLAIM_X (meta), CLAIM_O (meta), DRAW (meta full, co-sign)
+  // Branches: CANCEL, JOIN, MOVE, IDLE_REFUND, CLAIM_X, CLAIM_O, DRAW
 
   val board      = SELF.R4[Coll[Byte]].get
   val p1         = SELF.R5[GroupElement].get
   val p2         = SELF.R6[GroupElement].get
   val wager      = SELF.R7[Long].get
-  val constraint = SELF.R8[Long].get
+  val lastActive = SELF.R8[Long].get
+  val constraint = SELF.R9[Long].get
 
   val empty: Byte = 0
   val X: Byte     = 1
   val O: Byte     = 2
   val FREE: Long  = -1L
+
+  val idleBlocks = 5040L
+  val feeAllow = 5000000L
 
   val count = board.fold(0, { (acc: Int, c: Byte) =>
     if (c != empty) acc + 1 else acc
@@ -25,7 +30,6 @@
 
   val open = p1 == p2
 
-  // ---------- helpers: board index i for sub s, cell c: i = s*9 + c ----------
   val subXWon = { (s: Int) =>
     val b = s * 9
     (board(b+0) == X && board(b+1) == X && board(b+2) == X) ||
@@ -92,6 +96,7 @@
   val p1Turn    = count % 2 == 0
   val mover     = if (p1Turn) p1 else p2
   val moverSym  = if (p1Turn) X else O
+  val waiter    = if (p1Turn) p2 else p1
 
   val cancelBranch = open
 
@@ -102,15 +107,15 @@
     out.R5[GroupElement].get == p1 &&
     out.R6[GroupElement].get != p1 &&
     out.R7[Long].get == wager &&
-    out.R8[Long].get == constraint &&
+    out.R8[Long].get == HEIGHT &&
+    out.R9[Long].get == constraint &&
     out.value >= SELF.value + wager
   }
 
-  // MOVE: one empty -> moverSym; legal sub-board; R8' from Ultimate rule
   val moveBranch = ongoing && {
     val out          = OUTPUTS(0)
     val newBoard     = out.R4[Coll[Byte]].get
-    val newConstr    = out.R8[Long].get
+    val newConstr    = out.R9[Long].get
     val pairs        = board.zip(newBoard)
     val changeCount = pairs.fold(0, { (acc: Int, pr: (Byte, Byte)) =>
       if (pr._1 != pr._2) acc + 1 else acc
@@ -119,7 +124,6 @@
       pr._1 == pr._2 || (pr._1 == empty && pr._2 == moverSym)
     }
 
-    // Single changed cell index (0..80) — exactly one diff required
     val IDX = Coll(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80)
     val changedIdx = IDX.fold(-1, { (acc: Int, i: Int) =>
       if (acc >= 0) acc
@@ -136,7 +140,6 @@
 
     val targetNext = playCell
     val tBase = targetNext * 9
-    // Match TS `metaOutcomeOfSub`: free move when sent-to mini-board is decided (win or cat's game).
     val nbXWon =
       (newBoard(tBase+0) == X && newBoard(tBase+1) == X && newBoard(tBase+2) == X) ||
       (newBoard(tBase+3) == X && newBoard(tBase+4) == X && newBoard(tBase+5) == X) ||
@@ -176,12 +179,22 @@
     out.R5[GroupElement].get == p1 &&
     out.R6[GroupElement].get == p2 &&
     out.R7[Long].get == wager &&
+    out.R8[Long].get == HEIGHT &&
     out.value >= SELF.value
   }
+
+  val idleRefundBranch = ongoing &&
+    HEIGHT > lastActive + idleBlocks &&
+    OUTPUTS.size >= 2 &&
+    OUTPUTS(0).value >= wager - feeAllow &&
+    OUTPUTS(1).value >= wager - feeAllow &&
+    blake2b256(proveDlog(p1).propBytes) == blake2b256(OUTPUTS(0).propositionBytes) &&
+    blake2b256(proveDlog(p2).propBytes) == blake2b256(OUTPUTS(1).propositionBytes)
 
   (cancelBranch && proveDlog(p1))             ||
   joinBranch                                   ||
   (moveBranch   && proveDlog(mover))          ||
+  (idleRefundBranch && proveDlog(waiter))     ||
   (metaXWon     && proveDlog(p1))             ||
   (metaOWon     && proveDlog(p2))             ||
   (metaDrawn    && proveDlog(p1) && proveDlog(p2))

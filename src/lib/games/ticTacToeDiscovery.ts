@@ -12,9 +12,19 @@ import {
   getGameErgoTreeHex,
   parseGameBox,
 } from "./ticTacToeContract";
+import {
+  TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX,
+} from "./gameLegacyTrees";
 import { nonEmptyCount, winnerOf, CELL_EMPTY } from "./ticTacToeLogic";
 
 const EXPLORER_API = "https://api.ergoplatform.com/api/v1";
+
+export const fetchErgoTipHeight = async (): Promise<number> => {
+  const res = await fetch(`${EXPLORER_API}/blocks/headers?limit=1`);
+  if (!res.ok) throw new Error(`Explorer headers HTTP ${res.status}`);
+  const body = await res.json();
+  return (body.items || body)[0].height;
+};
 
 export interface DiscoveredGame {
   box: ExplorerBoxLike;
@@ -66,18 +76,29 @@ const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredGame | null => {
  * don't want crashing the lobby.
  */
 export const fetchAllGames = async (): Promise<DiscoveredGame[]> => {
-  const treeHex = getGameErgoTreeHex();
-  const url = `${EXPLORER_API}/boxes/unspent/byErgoTree/${treeHex}?limit=100`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Explorer HTTP ${res.status}`);
-  }
-  const body = await res.json();
-  const items: ExplorerBoxLike[] = body.items || [];
+  const treeHexes = [
+    getGameErgoTreeHex(),
+    TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX,
+  ];
   const games: DiscoveredGame[] = [];
-  for (const box of items) {
-    const g = boxToDiscovered(box);
-    if (g) games.push(g);
+  const seen = new Set<string>();
+
+  for (const treeHex of treeHexes) {
+    const url = `${EXPLORER_API}/boxes/unspent/byErgoTree/${treeHex}?limit=100`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Explorer HTTP ${res.status}`);
+    }
+    const body = await res.json();
+    const items: ExplorerBoxLike[] = body.items || [];
+    for (const box of items) {
+      if (seen.has(box.boxId)) continue;
+      const g = boxToDiscovered(box);
+      if (g) {
+        seen.add(box.boxId);
+        games.push(g);
+      }
+    }
   }
   return games;
 };
@@ -98,35 +119,41 @@ export const fetchOpenGames = async (): Promise<DiscoveredGame[]> => {
 export const fetchRecentGameHistory = async (
   limit = 30
 ): Promise<GameHistorySnapshot[]> => {
-  const treeHex = getGameErgoTreeHex();
-  const url = `${EXPLORER_API}/boxes/byErgoTree/${treeHex}?limit=${limit}&offset=0&sortDirection=desc`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Explorer HTTP ${res.status}`);
-  }
-  const body = await res.json();
-  const items: ExplorerBoxLike[] = body.items || [];
+  const treeHexes = [getGameErgoTreeHex(), TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX];
   const out: GameHistorySnapshot[] = [];
-  for (const box of items) {
-    const g = boxToDiscovered(box);
-    if (!g) continue;
-    const spent = box.spentTransactionId;
-    if (!spent || typeof spent !== "string") continue;
-    const h = box.settlementHeight;
-    if (typeof h !== "number") continue;
-    // Mid-game moves spend an "ongoing" box to create the next one; those
-    // are not finished matches — skip so the list reads as "archived games".
-    if (g.phase === "ongoing") continue;
-    out.push({
-      box: g.box,
-      state: g.state,
-      phase: g.phase,
-      isJoined: g.isJoined,
-      settlementHeight: h,
-      spentTransactionId: spent,
-    });
+  const seen = new Set<string>();
+
+  for (const treeHex of treeHexes) {
+    const url = `${EXPLORER_API}/boxes/byErgoTree/${treeHex}?limit=${limit}&offset=0&sortDirection=desc`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Explorer HTTP ${res.status}`);
+    }
+    const body = await res.json();
+    const items: ExplorerBoxLike[] = body.items || [];
+    for (const box of items) {
+      const g = boxToDiscovered(box);
+      if (!g) continue;
+      const spent = box.spentTransactionId;
+      if (!spent || typeof spent !== "string") continue;
+      const h = box.settlementHeight;
+      if (typeof h !== "number") continue;
+      if (g.phase === "ongoing") continue;
+      const key = `${box.boxId}|${spent}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        box: g.box,
+        state: g.state,
+        phase: g.phase,
+        isJoined: g.isJoined,
+        settlementHeight: h,
+        spentTransactionId: spent,
+      });
+    }
   }
-  return out;
+  out.sort((a, b) => b.settlementHeight - a.settlementHeight);
+  return out.slice(0, limit);
 };
 
 /**

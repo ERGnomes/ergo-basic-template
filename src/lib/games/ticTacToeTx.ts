@@ -42,6 +42,10 @@ import {
   getGameP2SAddress,
   pubkeyToMainnetAddress,
 } from "./ticTacToeContract";
+import {
+  IDLE_REFUND_BLOCKS,
+  IDLE_REFUND_FEE_ALLOWANCE_NANO,
+} from "./gameIdleConstants";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 
@@ -119,6 +123,7 @@ export const buildCreateGameTx = async (params: {
     p1PubKeyHex: creatorPubKeyHex,
     p2PubKeyHex: creatorPubKeyHex,
     wagerNanoErg,
+    lastActiveHeight: height,
   };
   const regs = encodeAllRegisters(gameState);
 
@@ -130,6 +135,7 @@ export const buildCreateGameTx = async (params: {
     R5: regs.R5 as any,
     R6: regs.R6 as any,
     R7: regs.R7 as any,
+    R8: regs.R8 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -175,6 +181,7 @@ export const buildJoinGameTx = async (params: {
   const newState: GameState = {
     ...currentGameState,
     p2PubKeyHex: joinerPubKeyHex,
+    lastActiveHeight: height,
   };
   const regs = encodeAllRegisters(newState);
 
@@ -189,6 +196,7 @@ export const buildJoinGameTx = async (params: {
     R5: regs.R5 as any,
     R6: regs.R6 as any,
     R7: regs.R7 as any,
+    R8: regs.R8 as any,
   });
 
   // The game box MUST be input 0 for the contract's OUTPUTS(0) check to
@@ -242,13 +250,17 @@ export const buildMoveTx = async (params: {
   }
 
   const nextBoard = applyMove(currentGameState.board, cell);
-  const nextState: GameState = { ...currentGameState, board: nextBoard };
+  const height = await fetchCurrentHeight();
+  const nextState: GameState = {
+    ...currentGameState,
+    board: nextBoard,
+    lastActiveHeight: height,
+  };
   const regs = encodeAllRegisters(nextState);
 
   // We may need extra funding to pay the fee; fetch the mover's other
   // UTXOs to chip in.
   const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(moverAddress));
-  const height = await fetchCurrentHeight();
 
   const out = new OutputBuilder(
     BigInt(currentGameBox.value),
@@ -258,6 +270,7 @@ export const buildMoveTx = async (params: {
     R5: regs.R5 as any,
     R6: regs.R6 as any,
     R7: regs.R7 as any,
+    R8: regs.R8 as any,
   });
 
   const unsigned = new TransactionBuilder(height)
@@ -417,6 +430,102 @@ export const buildDrawSplitTx = async (params: {
     .toEIP12Object();
 
   return { unsignedEip12: unsigned, inputBoxes: [currentGameBox] };
+};
+
+/**
+ * After `IDLE_REFUND_BLOCKS` without a move, the **waiting** player may
+ * recover both wagers to plain P2PK outputs (contract `idleRefundBranch`).
+ */
+export const buildIdleRefundTx = async (params: {
+  currentGameBox: any;
+  currentGameState: GameState;
+  signerPubKeyHex: string;
+  signerAddress: string;
+}) => {
+  const { currentGameState, signerPubKeyHex, signerAddress } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+
+  if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
+    throw new Error("Game is not joined yet.");
+  }
+  if (winnerOf(currentGameState.board) !== null) {
+    throw new Error("Game already has a winner — use claim.");
+  }
+  if (nonEmptyCount(currentGameState.board) === 9) {
+    throw new Error("Board is full — use draw split if applicable.");
+  }
+
+  if (currentGameState.lastActiveHeight <= 0) {
+    throw new Error(
+      "This game box predates the idle-refund upgrade; on-chain refund is unavailable."
+    );
+  }
+
+  const height = await fetchCurrentHeight();
+  if (height < currentGameState.lastActiveHeight + IDLE_REFUND_BLOCKS) {
+    throw new Error(
+      `Opponent still has until block ${
+        currentGameState.lastActiveHeight + IDLE_REFUND_BLOCKS
+      } (chain is ${height}) before you can refund.`
+    );
+  }
+
+  const myTurnAsP1 = isXTurn(currentGameState.board);
+  const waiterPk = myTurnAsP1
+    ? currentGameState.p2PubKeyHex
+    : currentGameState.p1PubKeyHex;
+  if (signerPubKeyHex !== waiterPk) {
+    throw new Error(
+      "Only the player waiting for a move can refund after the idle period."
+    );
+  }
+
+  const p1Addr = pubkeyToMainnetAddress(currentGameState.p1PubKeyHex);
+  const p2Addr = pubkeyToMainnetAddress(currentGameState.p2PubKeyHex);
+
+  const gameValue = BigInt(currentGameBox.value);
+  const fee = RECOMMENDED_MIN_FEE_VALUE;
+  const potAfterFee = gameValue - fee;
+  if (potAfterFee <= BigInt(0)) {
+    throw new Error("Box value too low to pay network fee.");
+  }
+
+  const minEach = currentGameState.wagerNanoErg - IDLE_REFUND_FEE_ALLOWANCE_NANO;
+  if (minEach <= BigInt(0)) {
+    throw new Error("Wager too small for the contract's refund formula.");
+  }
+
+  const half = potAfterFee / BigInt(2);
+  const rem = potAfterFee % BigInt(2);
+  const toP1 = half + rem;
+  const toP2 = half;
+  if (toP1 < minEach || toP2 < minEach) {
+    throw new Error(
+      "Pot cannot satisfy the contract after fees — try again or contact support."
+    );
+  }
+  if (toP1 < SAFE_MIN_BOX_VALUE || toP2 < SAFE_MIN_BOX_VALUE) {
+    throw new Error("Refund outputs would be below the minimum box value.");
+  }
+
+  const out1 = new OutputBuilder(toP1, ErgoAddress.fromBase58(p1Addr));
+  const out2 = new OutputBuilder(toP2, ErgoAddress.fromBase58(p2Addr));
+
+  const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(signerAddress));
+
+  const unsigned = new TransactionBuilder(height)
+    .from([currentGameBox, ...funding])
+    .to(out1)
+    .to(out2)
+    .sendChangeTo(signerAddress)
+    .payFee(fee)
+    .build()
+    .toEIP12Object();
+
+  return {
+    unsignedEip12: unsigned,
+    inputBoxes: [currentGameBox, ...funding],
+  };
 };
 
 /**
