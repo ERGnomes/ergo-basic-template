@@ -12,6 +12,7 @@ const emptyState = (p1: string): GameState => ({
   p1PubKeyHex: p1,
   p2PubKeyHex: p1,
   wagerNanoErg: BigInt("1000000000"),
+  lastActiveHeight: 0,
 });
 
 const mockBox = (over: Partial<ExplorerBoxLike>): ExplorerBoxLike => ({

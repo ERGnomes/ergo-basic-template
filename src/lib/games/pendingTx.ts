@@ -21,7 +21,14 @@
 
 import { Board } from "./ticTacToeLogic";
 
-export type PendingKind = "create" | "join" | "move" | "cancel" | "claim" | "draw";
+export type PendingKind =
+  | "create"
+  | "join"
+  | "move"
+  | "cancel"
+  | "claim"
+  | "draw"
+  | "idle";
 
 export interface PendingTx {
   /** Stable id; we use the on-chain txId once we have it. */
@@ -35,6 +42,8 @@ export interface PendingTx {
     p1PubKeyHex: string;
     p2PubKeyHex: string;
     wagerNanoErg: string; // serialized for localStorage
+    /** Present after idle-refund upgrade; 0 if unknown (optimistic only). */
+    lastActiveHeight?: number;
   } | null;
   /** Extra metadata for the predicted next box ("created", "joined", ...). */
   predictedPhase: "open" | "ongoing" | "won" | "drawn" | "spent";
@@ -132,7 +141,12 @@ export const reconcilePending = (snap: ChainSnapshot): void => {
       ? snap.unspentTriples.has(followKey)
       : false;
 
-    if (p.kind === "cancel" || p.kind === "claim" || p.kind === "draw") {
+    if (
+      p.kind === "cancel" ||
+      p.kind === "claim" ||
+      p.kind === "draw" ||
+      p.kind === "idle"
+    ) {
       // Resolved when the spent box is gone (no successor expected).
       if (spentDisappeared) continue;
       surviving.push(p);

@@ -38,6 +38,7 @@ import {
 } from "@chakra-ui/react";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { useWallet } from "../../context/WalletContext";
+import { fetchErgoTipHeight } from "../../lib/games/ticTacToeDiscovery";
 import {
   DiscoveredSuperGame,
   SuperGameHistorySnapshot,
@@ -65,6 +66,7 @@ import {
   buildSuperClaimWinTx,
   buildSuperCreateGameTx,
   buildSuperDrawSplitTx,
+  buildSuperIdleRefundTx,
   buildSuperJoinGameTx,
   buildSuperMoveTx,
   getSuperPlayerAddresses,
@@ -76,6 +78,7 @@ import {
   unlockWithPasskey,
   ErgoSecretBytes,
 } from "../../lib/ergoKeyVault";
+import { IDLE_REFUND_BLOCKS } from "../../lib/games/gameIdleConstants";
 import { recordErgoTxActivity } from "../../lib/ergoTxActivity";
 import {
   PendingSuperTx,
@@ -124,6 +127,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
   const [wagerErg, setWagerErg] = useState(DEFAULT_WAGER_ERG);
   const [myPubKey, setMyPubKey] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingSuperTx[]>(() => getPendingSuperTxs());
+  const [tipHeight, setTipHeight] = useState(0);
   const [historyInspect, setHistoryInspect] = useState<SuperGameHistorySnapshot | null>(
     null
   );
@@ -170,6 +174,11 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
       ]);
       setGames(out);
       setGameHistory(hist);
+      try {
+        setTipHeight(await fetchErgoTipHeight());
+      } catch {
+        // non-fatal
+      }
       const unspentBoxIds = new Set(out.map((g) => g.box.boxId));
       const unspentTriples = new Set(out.map((g) => tripleKey(g.state)));
       reconcilePendingSuper({ unspentBoxIds, unspentTriples });
@@ -214,6 +223,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
         p1PubKeyHex: p.predicted.p1PubKeyHex,
         p2PubKeyHex: p.predicted.p2PubKeyHex,
         wagerNanoErg: wagerBig,
+        lastActiveHeight: p.predicted.lastActiveHeight ?? 0,
       };
       const overlay: DiscoveredSuperGame = existing
         ? {
@@ -352,6 +362,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     await withBusy("Building create-game transaction…", async () => {
       try {
         const wagerNanoErg = BigInt(Math.floor(wagerErg * NANO_PER_ERG));
+        const la = await fetchErgoTipHeight();
         const tx = await buildSuperCreateGameTx({
           creatorAddress: ergoAddress,
           creatorPubKeyHex: myPubKey,
@@ -377,6 +388,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
             p1PubKeyHex: myPubKey,
             p2PubKeyHex: myPubKey,
             wagerNanoErg: wagerNanoErg.toString(),
+            lastActiveHeight: la,
           },
           predictedPhase: "open",
           follow: {
@@ -410,6 +422,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
           joinerAddress: ergoAddress,
           joinerPubKeyHex: myPubKey,
         });
+        const la = await fetchErgoTipHeight();
         const pendingTemplate: Omit<PendingSuperTx, "id" | "submittedAt"> = {
           kind: "join",
           spentBoxId: game.box.boxId,
@@ -419,6 +432,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
             p1PubKeyHex: game.state.p1PubKeyHex,
             p2PubKeyHex: myPubKey,
             wagerNanoErg: game.state.wagerNanoErg.toString(),
+            lastActiveHeight: la,
           },
           predictedPhase: "ongoing",
           follow: {
@@ -432,7 +446,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
         if (ok) {
           setActiveGame({
             ...game,
-            state: { ...game.state, p2PubKeyHex: myPubKey },
+            state: { ...game.state, p2PubKeyHex: myPubKey, lastActiveHeight: la },
             isJoined: true,
             phase: "ongoing",
           });
@@ -464,6 +478,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
         });
         const g = superChainStateToGame(activeGame.state);
         const predicted = applySuperMove(g, subIndex, cellIndex);
+        const la = await fetchErgoTipHeight();
         const pendingTemplate: Omit<PendingSuperTx, "id" | "submittedAt"> = {
           kind: "move",
           spentBoxId: activeGame.box.boxId,
@@ -473,6 +488,7 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
             p1PubKeyHex: activeGame.state.p1PubKeyHex,
             p2PubKeyHex: activeGame.state.p2PubKeyHex,
             wagerNanoErg: activeGame.state.wagerNanoErg.toString(),
+            lastActiveHeight: la,
           },
           predictedPhase: "ongoing",
           follow: {
@@ -625,6 +641,45 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     });
   };
 
+  const handleSuperIdleRefund = async (gameOverride?: DiscoveredSuperGame | null) => {
+    const g = gameOverride ?? activeGame;
+    if (!g || !ergoAddress || !myPubKey) return;
+    await withBusy("Building idle refund transaction…", async () => {
+      try {
+        const tx = await buildSuperIdleRefundTx({
+          currentGameBox: g.box,
+          currentGameState: g.state,
+          signerPubKeyHex: myPubKey,
+          signerAddress: ergoAddress,
+        });
+        const ok = await signAndSubmitTx(tx, {
+          kind: "idle",
+          spentBoxId: g.box.boxId,
+          predicted: null,
+          predictedPhase: "spent",
+          follow: {
+            p1PubKeyHex: g.state.p1PubKeyHex,
+            p2PubKeyHex: g.state.p2PubKeyHex,
+            wagerNanoErg: g.state.wagerNanoErg.toString(),
+          },
+          description: "xoxo idle refund — return wagers to both players",
+        });
+        if (ok) {
+          setTimeout(refreshGames, 3000);
+          setTimeout(() => setActiveGame(null), 3000);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Couldn't refund",
+          description: err?.message || String(err),
+          status: "error",
+          duration: 8000,
+          isClosable: true,
+        });
+      }
+    });
+  };
+
   const pendingBoxIds = useMemo(
     () => new Set(pending.map((p) => p.spentBoxId).filter(Boolean) as string[]),
     [pending]
@@ -646,6 +701,22 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
     ((metaW === CELL_X && iAmP1Active) || (metaW === CELL_O && iAmP2Active));
   const canDrawSuperActive =
     !!activeGame && activeGame.phase === "drawn" && (iAmP1Active || iAmP2Active);
+  const waiterPkSuper =
+    activeGame &&
+    activeGame.state.p1PubKeyHex !== activeGame.state.p2PubKeyHex &&
+    activeGame.phase === "ongoing"
+      ? totalMoves(activeGame.state.boards) % 2 === 0
+        ? activeGame.state.p2PubKeyHex
+        : activeGame.state.p1PubKeyHex
+      : null;
+  const canIdleSuperActive =
+    !!activeGame &&
+    activeGame.phase === "ongoing" &&
+    !!myPubKey &&
+    waiterPkSuper === myPubKey &&
+    activeGame.state.lastActiveHeight > 0 &&
+    tipHeight > 0 &&
+    tipHeight >= activeGame.state.lastActiveHeight + IDLE_REFUND_BLOCKS;
 
   const myTurn =
     activeGame &&
@@ -670,8 +741,10 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
           <AlertTitle>Unaudited xoxo contract</AlertTitle>
           <AlertDescription fontSize="sm">
             Separate ErgoTree from classic tic-tac-toe. Same economics: wager,
-            join, moves, winner claim, draw requires co-sign. No abandonment
-            timeout.
+            join, moves, winner claim, draw requires co-sign. After{" "}
+            {IDLE_REFUND_BLOCKS.toLocaleString()} blocks without a move (~one week
+            at ~2 min/block), the player waiting for a move may refund both wagers.
+            Legacy boxes without an activity height cannot use idle refund.
           </AlertDescription>
         </Stack>
       </Alert>
@@ -801,6 +874,16 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                   Claim win
                 </Button>
               )}
+              {canIdleSuperActive && (
+                <Button
+                  size="sm"
+                  colorScheme="orange"
+                  onClick={() => void handleSuperIdleRefund()}
+                  isDisabled={busy}
+                >
+                  Refund both (opponent idle)
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => setActiveGame(null)}>
                 Back to lobby
               </Button>
@@ -893,6 +976,20 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                         ((wMeta === CELL_X && iAmP1) || (wMeta === CELL_O && iAmP2));
                       const canDrawLobby =
                         g.phase === "drawn" && (iAmP1 || iAmP2) && !optimistic;
+                      const waiterPk =
+                        g.phase === "ongoing"
+                          ? totalMoves(g.state.boards) % 2 === 0
+                            ? g.state.p2PubKeyHex
+                            : g.state.p1PubKeyHex
+                          : null;
+                      const canIdleLobby =
+                        g.phase === "ongoing" &&
+                        (iAmP1 || iAmP2) &&
+                        myPubKey === waiterPk &&
+                        g.state.lastActiveHeight > 0 &&
+                        tipHeight > 0 &&
+                        tipHeight >= g.state.lastActiveHeight + IDLE_REFUND_BLOCKS &&
+                        !optimistic;
                       const sg = superChainStateToGame(g.state);
                       const st = superStatusOf(sg);
                       return (
@@ -950,6 +1047,16 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                                   isDisabled={busy}
                                 >
                                   Sign draw
+                                </Button>
+                              )}
+                              {canIdleLobby && (
+                                <Button
+                                  size="xs"
+                                  colorScheme="orange"
+                                  onClick={() => void handleSuperIdleRefund(g)}
+                                  isDisabled={busy}
+                                >
+                                  Refund (idle)
                                 </Button>
                               )}
                             </HStack>

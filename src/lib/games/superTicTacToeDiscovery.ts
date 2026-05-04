@@ -8,6 +8,7 @@ import {
   parseSuperGameBox,
   type SuperChainGameState,
 } from "./superTicTacToeContract";
+import { SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX } from "./gameLegacyTrees";
 import { superMetaFull, superWinner } from "./superTicTacToeLogic";
 
 const EXPLORER_API = "https://api.ergoplatform.com/api/v1";
@@ -54,18 +55,29 @@ const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredSuperGame | null => {
 };
 
 export const fetchAllSuperGames = async (): Promise<DiscoveredSuperGame[]> => {
-  const treeHex = getSuperGameErgoTreeHex();
-  const url = `${EXPLORER_API}/boxes/unspent/byErgoTree/${treeHex}?limit=100`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Explorer HTTP ${res.status}`);
-  }
-  const body = await res.json();
-  const items: ExplorerBoxLike[] = body.items || [];
+  const treeHexes = [
+    getSuperGameErgoTreeHex(),
+    SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX,
+  ];
   const games: DiscoveredSuperGame[] = [];
-  for (const box of items) {
-    const g = boxToDiscovered(box);
-    if (g) games.push(g);
+  const seen = new Set<string>();
+
+  for (const treeHex of treeHexes) {
+    const url = `${EXPLORER_API}/boxes/unspent/byErgoTree/${treeHex}?limit=100`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Explorer HTTP ${res.status}`);
+    }
+    const body = await res.json();
+    const items: ExplorerBoxLike[] = body.items || [];
+    for (const box of items) {
+      if (seen.has(box.boxId)) continue;
+      const g = boxToDiscovered(box);
+      if (g) {
+        seen.add(box.boxId);
+        games.push(g);
+      }
+    }
   }
   return games;
 };
@@ -78,33 +90,44 @@ export const fetchOpenSuperGames = async (): Promise<DiscoveredSuperGame[]> => {
 export const fetchRecentSuperGameHistory = async (
   limit = 30
 ): Promise<SuperGameHistorySnapshot[]> => {
-  const treeHex = getSuperGameErgoTreeHex();
-  const url = `${EXPLORER_API}/boxes/byErgoTree/${treeHex}?limit=${limit}&offset=0&sortDirection=desc`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Explorer HTTP ${res.status}`);
-  }
-  const body = await res.json();
-  const items: ExplorerBoxLike[] = body.items || [];
+  const treeHexes = [
+    getSuperGameErgoTreeHex(),
+    SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX,
+  ];
   const out: SuperGameHistorySnapshot[] = [];
-  for (const box of items) {
-    const g = boxToDiscovered(box);
-    if (!g) continue;
-    const spent = box.spentTransactionId;
-    if (!spent || typeof spent !== "string") continue;
-    const h = box.settlementHeight;
-    if (typeof h !== "number") continue;
-    if (g.phase === "ongoing") continue;
-    out.push({
-      box: g.box,
-      state: g.state,
-      phase: g.phase,
-      isJoined: g.isJoined,
-      settlementHeight: h,
-      spentTransactionId: spent,
-    });
+  const seen = new Set<string>();
+
+  for (const treeHex of treeHexes) {
+    const url = `${EXPLORER_API}/boxes/byErgoTree/${treeHex}?limit=${limit}&offset=0&sortDirection=desc`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Explorer HTTP ${res.status}`);
+    }
+    const body = await res.json();
+    const items: ExplorerBoxLike[] = body.items || [];
+    for (const box of items) {
+      const g = boxToDiscovered(box);
+      if (!g) continue;
+      const spent = box.spentTransactionId;
+      if (!spent || typeof spent !== "string") continue;
+      const h = box.settlementHeight;
+      if (typeof h !== "number") continue;
+      if (g.phase === "ongoing") continue;
+      const key = `${box.boxId}|${spent}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        box: g.box,
+        state: g.state,
+        phase: g.phase,
+        isJoined: g.isJoined,
+        settlementHeight: h,
+        spentTransactionId: spent,
+      });
+    }
   }
-  return out;
+  out.sort((a, b) => b.settlementHeight - a.settlementHeight);
+  return out.slice(0, limit);
 };
 
 export const findCurrentSuperBoxForGame = async (
