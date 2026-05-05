@@ -1,10 +1,15 @@
 /**
  * Transaction builders for the Ultimate (Super) tic-tac-toe contract.
  * Mirrors `ticTacToeTx.ts` (create / join / move / cancel / claim).
+ *
+ * Join/move outputs use `gameContractAddressFromBox(...)` so the ErgoTree
+ * matches the spent UTXO (required by the contract), not necessarily the
+ * latest `getSuperGameP2SAddress()`.
  */
 
 import {
   ErgoAddress,
+  Network,
   OutputBuilder,
   RECOMMENDED_MIN_FEE_VALUE,
   SAFE_MIN_BOX_VALUE,
@@ -21,6 +26,7 @@ import {
 import {
   encodeSuperAllRegisters,
   getSuperGameP2SAddress,
+  parseSuperGameBox,
   pubkeyToMainnetAddress,
   type SuperChainGameState,
 } from "./superTicTacToeContract";
@@ -79,6 +85,32 @@ const normalizeExplorerBox = (box: any): any => {
 
 const normalizeExplorerBoxes = (boxes: any[]): any[] =>
   boxes.map(normalizeExplorerBox);
+
+const superGameStateFromChainBox = (rawBox: any): SuperChainGameState => {
+  const box = normalizeExplorerBox(rawBox);
+  const st = parseSuperGameBox({
+    boxId: String(box.boxId ?? ""),
+    value: box.value,
+    additionalRegisters: box.additionalRegisters,
+  });
+  if (!st) {
+    throw new Error(
+      "Could not decode super game registers from this UTXO — refresh and try again."
+    );
+  }
+  return st;
+};
+
+/** Same ErgoTree as the spent box — required by `out.propositionBytes == SELF.propositionBytes`. */
+const gameContractAddressFromBox = (box: any): ErgoAddress => {
+  const tree = box?.ergoTree;
+  if (typeof tree === "string" && tree.length >= 4) {
+    return ErgoAddress.fromErgoTree(tree, Network.Mainnet);
+  }
+  throw new Error(
+    "Game box has no ergoTree — wait for full box load or refresh."
+  );
+};
 
 const fetchUnspentBoxes = async (address: string): Promise<any[]> => {
   const res = await fetch(
@@ -175,15 +207,15 @@ export const buildSuperJoinGameTx = async (params: {
   joinerAddress: string;
   joinerPubKeyHex: string;
 }) => {
-  const { currentGameState, joinerAddress, joinerPubKeyHex } = params;
+  const { joinerAddress, joinerPubKeyHex } = params;
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
+  const currentGameState = superGameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("This game has already been joined.");
   }
   if (joinerPubKeyHex === currentGameState.p1PubKeyHex) {
     throw new Error("You can't join your own game.");
   }
-
-  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
   const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(joinerAddress));
   if (funding.length === 0) {
     throw new Error("No unspent boxes at your address to fund the join.");
@@ -202,7 +234,7 @@ export const buildSuperJoinGameTx = async (params: {
 
   const out = new OutputBuilder(
     newValue,
-    ErgoAddress.fromBase58(getSuperGameP2SAddress())
+    gameContractAddressFromBox(currentGameBox)
   ).setAdditionalRegisters({
     R4: regs.R4 as any,
     R5: regs.R5 as any,
@@ -253,9 +285,9 @@ export const buildSuperMoveTx = async (params: {
   subIndex: number;
   cellIndex: number;
 }) => {
-  const { currentGameState, moverAddress, moverPubKeyHex, subIndex, cellIndex } =
-    params;
+  const { moverAddress, moverPubKeyHex, subIndex, cellIndex } = params;
   const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
+  const currentGameState = superGameStateFromChainBox(currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game hasn't been joined yet.");
@@ -298,7 +330,7 @@ export const buildSuperMoveTx = async (params: {
 
   const out = new OutputBuilder(
     BigInt(currentGameBox.value),
-    ErgoAddress.fromBase58(getSuperGameP2SAddress())
+    gameContractAddressFromBox(currentGameBox)
   ).setAdditionalRegisters({
     R4: regs.R4 as any,
     R5: regs.R5 as any,
@@ -328,8 +360,9 @@ export const buildSuperCancelGameTx = async (params: {
   creatorAddress: string;
   creatorPubKeyHex: string;
 }) => {
-  const { currentGameState, creatorAddress, creatorPubKeyHex } = params;
+  const { creatorAddress, creatorPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
+  const currentGameState = superGameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("Game is already joined; cancel is no longer allowed.");
   }
@@ -363,8 +396,9 @@ export const buildSuperClaimWinTx = async (params: {
   winnerAddress: string;
   winnerPubKeyHex: string;
 }) => {
-  const { currentGameState, winnerAddress, winnerPubKeyHex } = params;
+  const { winnerAddress, winnerPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
+  const currentGameState = superGameStateFromChainBox(currentGameBox);
   const w = superWinner(currentGameState.boards);
   if (w === null) {
     throw new Error("No meta-board winner yet.");
@@ -407,8 +441,9 @@ export const buildSuperDrawSplitTx = async (params: {
   p2Address: string;
   signerPubKeyHex: string;
 }) => {
-  const { currentGameState, p1Address, p2Address, signerPubKeyHex } = params;
+  const { p1Address, p2Address, signerPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
+  const currentGameState = superGameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined.");
   }
@@ -462,8 +497,9 @@ export const buildSuperIdleRefundTx = async (params: {
   signerPubKeyHex: string;
   signerAddress: string;
 }) => {
-  const { currentGameState, signerPubKeyHex, signerAddress } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const { signerPubKeyHex, signerAddress } = params;
+  const currentGameBox = normalizeExplorerBox(await ensureFullGameBox(params.currentGameBox));
+  const currentGameState = superGameStateFromChainBox(currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined yet.");
