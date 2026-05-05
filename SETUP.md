@@ -93,4 +93,6 @@ This repo includes `nixpacks.toml` (Node 22, `legacy-peer-deps`, `npm run build`
 - `.env.example` — copy-paste template for env keys.
 - `src/lib/appEnv.ts` — source of truth for parsing `REACT_APP_WALLET_PROVIDERS` and related flags.
 - `src/lib/siteBranding.ts` — `REACT_APP_SITE_*` strings for forks.
+- **`docs/FORK_ERGO_GAMES.md`** — spin-off playbook (e.g. ERGO.games): fork, env, domain, launch.
+- **`.env.ergo.games.example`** — copy to `.env` as a starting point for a games-focused deploy.
 - `/developers` in the running app — short fork checklist and pointer to game modules (`App.tsx` route: `DeveloperGuidePage`).

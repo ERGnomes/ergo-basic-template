@@ -4,6 +4,10 @@ A **fork-friendly** React template for Ergo browser apps: Dynamic.xyz (email + p
 
 The hosted UI is a demo; the main audience is **developers** cloning the repo. Configure branding with `REACT_APP_SITE_*` (see [SETUP.md](./SETUP.md)); open **`/developers`** after `npm start` for a short fork checklist.
 
+### Building **ERGO.games** (or another spin-off)
+
+Step-by-step fork, env, domain, and launch checklist: **[docs/FORK_ERGO_GAMES.md](./docs/FORK_ERGO_GAMES.md)**. Quick env template: copy [`.env.ergo.games.example`](./.env.ergo.games.example) to `.env` and fill in your URLs and Dynamic id.
+
 ## 📱 Application Preview
 
 ### Landing Page

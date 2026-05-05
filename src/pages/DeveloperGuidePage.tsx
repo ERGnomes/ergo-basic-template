@@ -8,11 +8,16 @@ import {
   Stack,
   Text,
   UnorderedList,
+  useColorMode,
 } from "@chakra-ui/react";
 import { Link as RouterLink } from "react-router-dom";
 import { githubRepoUrl, siteName } from "../lib/siteBranding";
 
 const DeveloperGuidePage: React.FC = () => {
+  const { colorMode } = useColorMode();
+  const panelBg =
+    colorMode === "light" ? "blue.50" : "whiteAlpha.100";
+
   return (
     <Box maxW="800px" mx="auto">
       <Stack spacing={6}>
@@ -26,6 +31,44 @@ const DeveloperGuidePage: React.FC = () => {
           as a reference implementation — then delete or replace pieces you do not
           need.
         </Text>
+
+        <Box
+          borderWidth="1px"
+          borderRadius="md"
+          p={4}
+          borderColor="ergnome.blue"
+          bg={panelBg}
+        >
+          <Heading size="sm" mb={2}>
+            Spin-off: ERGO.games
+          </Heading>
+          <Text fontSize="sm" mb={2}>
+            Full playbook (GitHub fork, env, domain, launch checklist):{" "}
+            <Text as="span" fontFamily="mono" fontSize="xs">
+              docs/FORK_ERGO_GAMES.md
+            </Text>
+            . Example env:{" "}
+            <Text as="span" fontFamily="mono" fontSize="xs">
+              .env.ergo.games.example
+            </Text>
+            .
+          </Text>
+          {githubRepoUrl ? (
+            <Link
+              href={`${githubRepoUrl.replace(/\/$/, "")}/blob/main/docs/FORK_ERGO_GAMES.md`}
+              isExternal
+              color="ergnome.blue"
+              fontSize="sm"
+            >
+              Open spin-off guide on GitHub →
+            </Link>
+          ) : (
+            <Text fontSize="xs" opacity={0.8}>
+              After you clone, open <code>docs/FORK_ERGO_GAMES.md</code> in the repo
+              root.
+            </Text>
+          )}
+        </Box>
 
         <Box>
           <Heading size="md" mb={2}>
