@@ -38,8 +38,10 @@ import {
 } from "./ticTacToeLogic";
 import {
   encodeAllRegisters,
+  ExplorerBoxLike,
   GameState,
   getGameP2SAddress,
+  parseGameBox,
   pubkeyToMainnetAddress,
 } from "./ticTacToeContract";
 import {
@@ -77,6 +79,28 @@ const normalizeExplorerBox = (box: any): any => {
 
 const normalizeExplorerBoxes = (boxes: any[]): any[] =>
   boxes.map(normalizeExplorerBox);
+
+/**
+ * Read registers from the **spent** game UTXO. The UI often holds an
+ * optimistic `GameState` (pending moves) while `currentGameBox` still
+ * reflects the chain; using the latter avoids building a transition the
+ * contract rejects (wrong mover symbol / wrong delta).
+ */
+const gameStateFromChainBox = (rawBox: any): GameState => {
+  const box = normalizeExplorerBox(rawBox);
+  const like: ExplorerBoxLike = {
+    boxId: String(box.boxId ?? ""),
+    value: box.value,
+    additionalRegisters: box.additionalRegisters,
+  };
+  const st = parseGameBox(like);
+  if (!st) {
+    throw new Error(
+      "Could not decode game registers from this UTXO — refresh and try again."
+    );
+  }
+  return st;
+};
 
 const fetchUnspentBoxes = async (address: string): Promise<any[]> => {
   const res = await fetch(
@@ -163,15 +187,15 @@ export const buildJoinGameTx = async (params: {
   joinerAddress: string;
   joinerPubKeyHex: string;
 }) => {
-  const { currentGameState, joinerAddress, joinerPubKeyHex } = params;
+  const { joinerAddress, joinerPubKeyHex } = params;
+  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameState = gameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("This game has already been joined.");
   }
   if (joinerPubKeyHex === currentGameState.p1PubKeyHex) {
     throw new Error("You can't join your own game.");
   }
-
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
   const funding = normalizeExplorerBoxes(await fetchUnspentBoxes(joinerAddress));
   if (funding.length === 0) {
     throw new Error("No unspent boxes at your address to fund the join.");
@@ -227,8 +251,9 @@ export const buildMoveTx = async (params: {
   moverPubKeyHex: string;
   cell: number; // 0..8
 }) => {
-  const { currentGameState, moverAddress, moverPubKeyHex, cell } = params;
+  const { moverAddress, moverPubKeyHex, cell } = params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameState = gameStateFromChainBox(currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game hasn't been joined yet.");
@@ -297,8 +322,9 @@ export const buildCancelGameTx = async (params: {
   creatorAddress: string;
   creatorPubKeyHex: string;
 }) => {
-  const { currentGameState, creatorAddress, creatorPubKeyHex } = params;
+  const { creatorAddress, creatorPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameState = gameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("Game is already joined; cancel is no longer allowed.");
   }
@@ -337,8 +363,9 @@ export const buildClaimWinTx = async (params: {
   winnerAddress: string;
   winnerPubKeyHex: string;
 }) => {
-  const { currentGameState, winnerAddress, winnerPubKeyHex } = params;
+  const { winnerAddress, winnerPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameState = gameStateFromChainBox(currentGameBox);
   const winner = winnerOf(currentGameState.board);
   if (winner === null) {
     throw new Error("No winner yet.");
@@ -382,8 +409,9 @@ export const buildDrawSplitTx = async (params: {
   p2Address: string;
   signerPubKeyHex: string;
 }) => {
-  const { currentGameState, p1Address, p2Address, signerPubKeyHex } = params;
+  const { p1Address, p2Address, signerPubKeyHex } = params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameState = gameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined.");
   }
@@ -442,8 +470,9 @@ export const buildIdleRefundTx = async (params: {
   signerPubKeyHex: string;
   signerAddress: string;
 }) => {
-  const { currentGameState, signerPubKeyHex, signerAddress } = params;
+  const { signerPubKeyHex, signerAddress } = params;
   const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameState = gameStateFromChainBox(currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined yet.");
