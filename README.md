@@ -1,6 +1,8 @@
-# Ergo Basic Template
+# Ergo dApp starter
 
-A modular React template for building applications on the Ergo blockchain. This template provides a structured foundation with reusable components for wallet connection, token display, and a beautiful dashboard interface.
+A **fork-friendly** React template for Ergo browser apps: Dynamic.xyz (email + passkey vault) and/or Nautilus, NFT gallery, and **reference** on-chain tic-tac-toe examples (classic and Super / Ultimate). Licensed under **MIT** — use the code to build your own site; see [`LICENSE`](./LICENSE).
+
+The hosted UI is a demo; the main audience is **developers** cloning the repo. Configure branding with `REACT_APP_SITE_*` (see [SETUP.md](./SETUP.md)); open **`/developers`** after `npm start` for a short fork checklist.
 
 ## 📱 Application Preview
 
@@ -31,7 +33,7 @@ A modular React template for building applications on the Ergo blockchain. This 
 - **Responsive UI**: Built with Chakra UI for a beautiful, responsive experience
 - **Type Safety**: Written in TypeScript for improved developer experience
 - **Theme Customization**: Easily configurable theme with Ergo-inspired styling
-- **Animations & Transitions**: Smooth animations for a modern user experience
+- **On-chain games** (reference ErgoScript + Fleet SDK wiring): classic and Super / Ultimate tic-tac-toe — see **`/developers`** after `npm start` for module map and fork notes.
 
 ## 🚀 Getting Started
 
@@ -39,8 +41,8 @@ A modular React template for building applications on the Ergo blockchain. This 
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/ergo-basic-template.git
-   cd ergo-basic-template
+   git clone https://github.com/yourusername/ergo-dapp-starter.git
+   cd ergo-dapp-starter
    ```
 
 2. Install dependencies:

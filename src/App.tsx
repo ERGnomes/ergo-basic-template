@@ -6,15 +6,20 @@ import { PageLayout } from './components/layout/PageLayout';
 import { WalletConnector } from './components/wallet/WalletConnector';
 import { WalletDashboard } from './components/wallet/WalletDashboard';
 import NFTGalleryPage from './pages/NFTGalleryPage';
+import DeveloperGuidePage from './pages/DeveloperGuidePage';
+import NotFoundPage from './pages/NotFoundPage';
 import { WalletProvider } from './context/WalletContext';
 import RosenBridgeTest from './components/RosenBridgeTest';
 import { DynamicProvider } from './lib/DynamicProvider';
 import { ErgoWallet } from './components/ErgoWallet';
 import { TicTacToePage } from './components/games/TicTacToePage';
 import { SuperTicTacToePage } from './components/games/SuperTicTacToePage';
-import { dynamicAuthRoutesEnabled } from './lib/appEnv';
+import { devToolsNavEnabled, dynamicAuthRoutesEnabled } from './lib/appEnv';
+import { siteName } from './lib/siteBranding';
+import { useDocumentMeta } from './lib/useDocumentMeta';
 
 export const App = () => {
+  useDocumentMeta();
   // Ref to trigger wallet connect from components that need it
   const connectWalletRef = useRef<() => void>(() => {});
 
@@ -24,9 +29,12 @@ export const App = () => {
       ? [{ label: 'Dynamic Login', to: '/dynamic' as const }]
       : []),
     { label: 'Tic-Tac-Toe', to: '/games/tic-tac-toe' },
-    { label: 'xoxo (Super)', to: '/games/xoxo' },
+    { label: 'Super Tic-Tac-Toe', to: '/games/xoxo' },
     { label: 'NFT Gallery', to: '/nft-gallery' },
-    { label: 'Metadata Test', to: '/rosen-test' },
+    { label: 'Developer guide', to: '/developers' },
+    ...(devToolsNavEnabled
+      ? [{ label: 'Metadata test (dev)', to: '/rosen-test' as const }]
+      : []),
   ];
 
   return (
@@ -35,7 +43,7 @@ export const App = () => {
         <WalletProvider>
           <Router>
             <PageLayout
-              title="Ergo Wallet Explorer"
+              title={siteName}
               navbarRightComponent={<WalletConnector ref={connectWalletRef} />}
               navLinks={navLinks}
             >
@@ -50,7 +58,13 @@ export const App = () => {
                 <Route path="/games/tic-tac-toe" element={<TicTacToePage />} />
                 <Route path="/games/xoxo" element={<SuperTicTacToePage />} />
                 <Route path="/nft-gallery" element={<NFTGalleryPage />} />
-                <Route path="/rosen-test" element={<RosenBridgeTest />} />
+                <Route path="/developers" element={<DeveloperGuidePage />} />
+                {devToolsNavEnabled ? (
+                  <Route path="/rosen-test" element={<RosenBridgeTest />} />
+                ) : (
+                  <Route path="/rosen-test" element={<Navigate to="/" replace />} />
+                )}
+                <Route path="*" element={<NotFoundPage />} />
               </Routes>
             </PageLayout>
           </Router>

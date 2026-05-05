@@ -50,6 +50,6 @@ const { App } = require("./App")
 
 test("renders app shell with dashboard route", () => {
   render(<App />)
-  expect(screen.getByRole("heading", { name: /Ergo Wallet Explorer/i })).toBeInTheDocument()
+  expect(screen.getByRole("heading", { name: /Ergo dApp starter/i })).toBeInTheDocument()
   expect(screen.getByText("Dashboard")).toBeInTheDocument()
 })

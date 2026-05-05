@@ -16,7 +16,7 @@ Start with the Ergo Basic Template:
 
 ```bash
 # Clone the template
-git clone https://github.com/yourusername/ergo-basic-template.git ergo-raffle
+git clone https://github.com/yourusername/ergo-dapp-starter.git ergo-raffle
 cd ergo-raffle
 
 # Install dependencies
