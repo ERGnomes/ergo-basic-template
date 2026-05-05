@@ -16,7 +16,7 @@ Start with the Ergo Basic Template as your foundation:
 
 ```bash
 # Clone the template
-git clone https://github.com/yourusername/ergo-basic-template.git nft-gallery
+git clone https://github.com/yourusername/ergo-dapp-starter.git nft-gallery
 cd nft-gallery
 
 # Install dependencies

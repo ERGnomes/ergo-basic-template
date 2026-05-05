@@ -1,6 +1,6 @@
 {
   // ============================================================
-  // Tic-tac-toe game contract for the ergo-basic-template.
+  // Tic-tac-toe game contract for the ergo-dapp-starter template.
   //
   // Registers:
   //   R4: Coll[Byte], length 9   — board (0 empty, 1 X, 2 O)

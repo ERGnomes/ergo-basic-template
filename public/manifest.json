@@ -1,6 +1,6 @@
 {
-  "short_name": "Ergo Basic Template",
-  "name": "Ergo Basic Template",
+  "short_name": "Ergo starter",
+  "name": "Ergo dApp starter",
   "icons": [
     {
       "src": "favicon.ico",

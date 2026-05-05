@@ -47,3 +47,21 @@ export const nautilusDirectEnabled =
  */
 export const nautilusDirectAddressFallbackEnabled =
   walletProviderMode === "both" || walletProviderMode === "nautilus";
+
+/** Parse `REACT_APP_SHOW_DEV_TOOLS` style flags (1/true/on vs empty/false/0). */
+export const parseShowDevTools = (raw: string | undefined): boolean => {
+  const v = trim(raw).toLowerCase();
+  if (!v || v === "0" || v === "false" || v === "no" || v === "off") {
+    return false;
+  }
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+};
+
+/**
+ * `REACT_APP_SHOW_DEV_TOOLS`:
+ * When true, show internal demo nav (e.g. Rosen metadata test) and expose `/rosen-test`.
+ * Default **false** so forks look like a clean starter without editing `App.tsx`.
+ */
+export const devToolsNavEnabled = parseShowDevTools(
+  process.env.REACT_APP_SHOW_DEV_TOOLS
+);

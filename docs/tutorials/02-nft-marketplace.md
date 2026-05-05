@@ -16,7 +16,7 @@ Start with the Ergo Basic Template:
 
 ```bash
 # Clone the template
-git clone https://github.com/yourusername/ergo-basic-template.git nft-marketplace
+git clone https://github.com/yourusername/ergo-dapp-starter.git nft-marketplace
 cd nft-marketplace
 
 # Install dependencies

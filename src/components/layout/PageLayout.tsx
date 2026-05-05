@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
-import { Box, Container, useColorMode } from "@chakra-ui/react";
+import { Box, Container, Flex, useColorMode } from "@chakra-ui/react";
 import { Navbar } from './Navbar';
+import { SiteFooter } from './SiteFooter';
 
 interface NavLink {
   label: string;
@@ -23,15 +24,22 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
   const { colorMode } = useColorMode();
   
   return (
-    <Box minH="100vh" bg={colorMode === 'light' ? 'ergnome.bg.light' : 'ergnome.bg.dark'}>
+    <Flex
+      minH="100vh"
+      direction="column"
+      bg={colorMode === 'light' ? 'ergnome.bg.light' : 'ergnome.bg.dark'}
+    >
       <Navbar 
         title={title} 
         rightComponent={navbarRightComponent} 
         navLinks={navLinks}
       />
-      <Container maxW="container.xl" py={6}>
-        {children}
-      </Container>
-    </Box>
+      <Box flex="1">
+        <Container maxW="container.xl" py={6}>
+          {children}
+        </Container>
+      </Box>
+      <SiteFooter />
+    </Flex>
   );
 }; 

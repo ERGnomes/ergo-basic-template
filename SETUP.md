@@ -47,6 +47,21 @@ Your [Dynamic.xyz](https://app.dynamic.xyz/) project **Environment ID** (Dashboa
 
 If this is empty **and** `REACT_APP_WALLET_PROVIDERS` is not `nautilus-only`, a banner explains the misconfiguration. Nautilus-only builds can leave it empty.
 
+### Branding (fork-friendly)
+
+| Variable | Purpose |
+|----------|---------|
+| `REACT_APP_SITE_NAME` | Navbar title and `document.title` (default: `Ergo dApp starter`). |
+| `REACT_APP_SITE_DESCRIPTION` | Meta description; also used when Open Graph tags are injected at runtime. |
+| `REACT_APP_SITE_URL` | Optional canonical URL for `og:url` / `og:title` / `og:description`. |
+| `REACT_APP_GITHUB_REPO_URL` | Optional; shown in the footer as “Source on GitHub”. |
+
+### Developer demos
+
+| Variable | Purpose |
+|----------|---------|
+| `REACT_APP_SHOW_DEV_TOOLS` | Set to `true` / `1` / `on` to add **Metadata test (dev)** to the nav and serve `/rosen-test`. Omit or `false` for a clean starter. |
+
 ### Optional
 
 | Variable | Purpose |
@@ -77,3 +92,5 @@ This repo includes `nixpacks.toml` (Node 22, `legacy-peer-deps`, `npm run build`
 
 - `.env.example` — copy-paste template for env keys.
 - `src/lib/appEnv.ts` — source of truth for parsing `REACT_APP_WALLET_PROVIDERS` and related flags.
+- `src/lib/siteBranding.ts` — `REACT_APP_SITE_*` strings for forks.
+- `/developers` in the running app — short fork checklist and pointer to game modules (`App.tsx` route: `DeveloperGuidePage`).
