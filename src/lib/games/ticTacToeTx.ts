@@ -6,6 +6,12 @@
  * talk to the network beyond fetching the UTXOs it needs to fund the
  * transaction.
  *
+ * **Continuation outputs** (join / move) must target the same ErgoTree as
+ * the spent game box (`out.propositionBytes == SELF.propositionBytes` in
+ * the contract). We derive the recipient from `currentGameBox.ergoTree`, not
+ * from `getGameP2SAddress()`, so games created under an older compiled
+ * template still work after the app upgrades.
+ *
  * The four entry points map 1:1 to the contract branches:
  *
  *   buildCreateGameTx   — no game box yet; creator funds a new one
@@ -79,6 +85,48 @@ const normalizeExplorerBox = (box: any): any => {
 
 const normalizeExplorerBoxes = (boxes: any[]): any[] =>
   boxes.map(normalizeExplorerBox);
+
+const fetchExplorerBoxById = async (boxId: string): Promise<any> => {
+  const res = await fetch(`${ERGO_API}/boxes/${encodeURIComponent(boxId)}`);
+  if (!res.ok) {
+    throw new Error(`Game box fetch HTTP ${res.status}`);
+  }
+  return res.json();
+};
+
+/**
+ * Continuation outputs must use the **same** ErgoTree as the spent game box.
+ * `getGameP2SAddress()` tracks the latest compiled template; on-chain games
+ * may still sit under an older tree after upgrades, and the contract requires
+ * `out.propositionBytes == SELF.propositionBytes`.
+ */
+const gameContractAddressFromBox = (box: any): ErgoAddress => {
+  const tree = box?.ergoTree;
+  if (typeof tree === "string" && tree.length >= 4) {
+    return ErgoAddress.fromErgoTree(tree, Network.Mainnet);
+  }
+  throw new Error(
+    "Game box has no ergoTree in the cached payload — refresh or wait for sync."
+  );
+};
+
+const ensureGameBoxForSpend = async (box: any): Promise<any> => {
+  const normalized = normalizeExplorerBox(box);
+  if (typeof normalized.ergoTree === "string" && normalized.ergoTree.length >= 4) {
+    return normalized;
+  }
+  const id = normalized.boxId;
+  if (!id || typeof id !== "string") {
+    return normalized;
+  }
+  const full = normalizeExplorerBox(await fetchExplorerBoxById(id));
+  if (typeof full.ergoTree !== "string" || full.ergoTree.length < 4) {
+    throw new Error(
+      "Could not load ergoTree for this game box — try again from the lobby."
+    );
+  }
+  return full;
+};
 
 /**
  * Read registers from the **spent** game UTXO. The UI often holds an
@@ -188,7 +236,7 @@ export const buildJoinGameTx = async (params: {
   joinerPubKeyHex: string;
 }) => {
   const { joinerAddress, joinerPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = await ensureGameBoxForSpend(params.currentGameBox);
   const currentGameState = gameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("This game has already been joined.");
@@ -214,7 +262,7 @@ export const buildJoinGameTx = async (params: {
 
   const out = new OutputBuilder(
     newValue,
-    ErgoAddress.fromBase58(getGameP2SAddress())
+    gameContractAddressFromBox(currentGameBox)
   ).setAdditionalRegisters({
     R4: regs.R4 as any,
     R5: regs.R5 as any,
@@ -252,7 +300,7 @@ export const buildMoveTx = async (params: {
   cell: number; // 0..8
 }) => {
   const { moverAddress, moverPubKeyHex, cell } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = await ensureGameBoxForSpend(params.currentGameBox);
   const currentGameState = gameStateFromChainBox(currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
@@ -289,7 +337,7 @@ export const buildMoveTx = async (params: {
 
   const out = new OutputBuilder(
     BigInt(currentGameBox.value),
-    ErgoAddress.fromBase58(getGameP2SAddress())
+    gameContractAddressFromBox(currentGameBox)
   ).setAdditionalRegisters({
     R4: regs.R4 as any,
     R5: regs.R5 as any,
@@ -323,7 +371,7 @@ export const buildCancelGameTx = async (params: {
   creatorPubKeyHex: string;
 }) => {
   const { creatorAddress, creatorPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = await ensureGameBoxForSpend(params.currentGameBox);
   const currentGameState = gameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex !== currentGameState.p2PubKeyHex) {
     throw new Error("Game is already joined; cancel is no longer allowed.");
@@ -364,7 +412,7 @@ export const buildClaimWinTx = async (params: {
   winnerPubKeyHex: string;
 }) => {
   const { winnerAddress, winnerPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = await ensureGameBoxForSpend(params.currentGameBox);
   const currentGameState = gameStateFromChainBox(currentGameBox);
   const winner = winnerOf(currentGameState.board);
   if (winner === null) {
@@ -410,7 +458,7 @@ export const buildDrawSplitTx = async (params: {
   signerPubKeyHex: string;
 }) => {
   const { p1Address, p2Address, signerPubKeyHex } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = await ensureGameBoxForSpend(params.currentGameBox);
   const currentGameState = gameStateFromChainBox(currentGameBox);
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
     throw new Error("Game is not joined.");
@@ -471,7 +519,7 @@ export const buildIdleRefundTx = async (params: {
   signerAddress: string;
 }) => {
   const { signerPubKeyHex, signerAddress } = params;
-  const currentGameBox = normalizeExplorerBox(params.currentGameBox);
+  const currentGameBox = await ensureGameBoxForSpend(params.currentGameBox);
   const currentGameState = gameStateFromChainBox(currentGameBox);
 
   if (currentGameState.p1PubKeyHex === currentGameState.p2PubKeyHex) {
