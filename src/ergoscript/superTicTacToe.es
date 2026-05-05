@@ -102,12 +102,14 @@
 
   val joinBranch = open && {
     val out = OUTPUTS(0)
+    val newLA = out.R8[Long].get
     out.propositionBytes == SELF.propositionBytes &&
     out.R4[Coll[Byte]].get == board &&
     out.R5[GroupElement].get == p1 &&
     out.R6[GroupElement].get != p1 &&
     out.R7[Long].get == wager &&
-    out.R8[Long].get == HEIGHT &&
+    newLA >= lastActive &&
+    newLA <= HEIGHT &&
     out.R9[Long].get == constraint &&
     out.value >= SELF.value + wager
   }
@@ -116,6 +118,7 @@
     val out          = OUTPUTS(0)
     val newBoard     = out.R4[Coll[Byte]].get
     val newConstr    = out.R9[Long].get
+    val newLA        = out.R8[Long].get
     val pairs        = board.zip(newBoard)
     val changeCount = pairs.fold(0, { (acc: Int, pr: (Byte, Byte)) =>
       if (pr._1 != pr._2) acc + 1 else acc
@@ -179,7 +182,8 @@
     out.R5[GroupElement].get == p1 &&
     out.R6[GroupElement].get == p2 &&
     out.R7[Long].get == wager &&
-    out.R8[Long].get == HEIGHT &&
+    newLA >= lastActive &&
+    newLA <= HEIGHT &&
     out.value >= SELF.value
   }
 

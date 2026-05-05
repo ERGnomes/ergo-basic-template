@@ -14,7 +14,7 @@ import {
   parseSuperGameBox,
   type SuperChainGameState,
 } from "./superTicTacToeContract";
-import { SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX } from "./gameLegacyTrees";
+import { SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX, SUPER_TIC_TAC_TOE_LEGACY_R8_EQUALS_HEIGHT_TREE_HEX } from "./gameLegacyTrees";
 import { superMetaFull, superWinner } from "./superTicTacToeLogic";
 import {
   fetchBoxesByErgoTreeGql,
@@ -68,6 +68,7 @@ const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredSuperGame | null => {
 /** Current + legacy ErgoTree hex strings for merged discovery. */
 const superTreeHexes = (): string[] => [
   getSuperGameErgoTreeHex(),
+  SUPER_TIC_TAC_TOE_LEGACY_R8_EQUALS_HEIGHT_TREE_HEX,
   SUPER_TIC_TAC_TOE_LEGACY_PRE_R9_TREE_HEX,
 ];
 
