@@ -14,6 +14,7 @@ import {
 } from "./ticTacToeContract";
 import {
   TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX,
+  TIC_TAC_TOE_LEGACY_R8_EQUALS_HEIGHT_TREE_HEX,
 } from "./gameLegacyTrees";
 import { nonEmptyCount, winnerOf, CELL_EMPTY } from "./ticTacToeLogic";
 
@@ -78,6 +79,7 @@ const boxToDiscovered = (box: ExplorerBoxLike): DiscoveredGame | null => {
 export const fetchAllGames = async (): Promise<DiscoveredGame[]> => {
   const treeHexes = [
     getGameErgoTreeHex(),
+    TIC_TAC_TOE_LEGACY_R8_EQUALS_HEIGHT_TREE_HEX,
     TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX,
   ];
   const games: DiscoveredGame[] = [];
@@ -119,7 +121,7 @@ export const fetchOpenGames = async (): Promise<DiscoveredGame[]> => {
 export const fetchRecentGameHistory = async (
   limit = 30
 ): Promise<GameHistorySnapshot[]> => {
-  const treeHexes = [getGameErgoTreeHex(), TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX];
+  const treeHexes = [getGameErgoTreeHex(), TIC_TAC_TOE_LEGACY_R8_EQUALS_HEIGHT_TREE_HEX, TIC_TAC_TOE_LEGACY_NO_R8_TREE_HEX];
   const out: GameHistorySnapshot[] = [];
   const seen = new Set<string>();
 

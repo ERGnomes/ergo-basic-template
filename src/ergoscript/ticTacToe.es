@@ -8,7 +8,8 @@
   //   R6: GroupElement           — player 2 (O); equals R5 while open
   //   R7: Long                   — wager per player (nanoErgs)
   //   R8: Long                   — block height of last on-chain activity
-  //                                  (set at create/join; updated each MOVE)
+  //                                  (set at create/join; updated each MOVE;
+  //                                   must satisfy lastActive <= R8 <= HEIGHT)
   //
   // Branches: CANCEL, JOIN, MOVE, CLAIM_X, CLAIM_O, DRAW,
   //           IDLE_REFUND (waiting player refunds both after inactivity)
@@ -63,20 +64,26 @@
 
   val cancelBranch = open
 
+  // R8 = last activity height. Require monotonic update and "not in the future"
+  // so mempool validation still passes when HEIGHT advances past the tip the
+  // client used when building the tx (Explorer vs block-attachment skew).
   val joinBranch = open && {
     val out = OUTPUTS(0)
+    val newLA = out.R8[Long].get
     out.propositionBytes == SELF.propositionBytes &&
     out.R4[Coll[Byte]].get == board &&
     out.R5[GroupElement].get == p1 &&
     out.R6[GroupElement].get != p1 &&
     out.R7[Long].get == wager &&
-    out.R8[Long].get == HEIGHT &&
+    newLA >= lastActive &&
+    newLA <= HEIGHT &&
     out.value >= SELF.value + wager
   }
 
   val moveBranch = ongoing && {
     val out       = OUTPUTS(0)
     val newBoard  = out.R4[Coll[Byte]].get
+    val newLA     = out.R8[Long].get
     val pairs     = board.zip(newBoard)
 
     val allCellsValid = pairs.forall { (pr: (Byte, Byte)) =>
@@ -94,7 +101,8 @@
     out.R5[GroupElement].get == p1 &&
     out.R6[GroupElement].get == p2 &&
     out.R7[Long].get == wager &&
-    out.R8[Long].get == HEIGHT &&
+    newLA >= lastActive &&
+    newLA <= HEIGHT &&
     out.value >= SELF.value
   }
 
