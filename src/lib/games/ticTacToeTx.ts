@@ -54,6 +54,7 @@ import {
   IDLE_REFUND_BLOCKS,
   IDLE_REFUND_FEE_ALLOWANCE_NANO,
 } from "./gameIdleConstants";
+import { MIN_WAGER_NANOERG } from "./gameWagerLimits";
 
 const ERGO_API = "https://api.ergoplatform.com/api/v1";
 
@@ -179,8 +180,8 @@ export const buildCreateGameTx = async (params: {
   wagerNanoErg: bigint;
 }) => {
   const { creatorAddress, creatorPubKeyHex, wagerNanoErg } = params;
-  if (wagerNanoErg <= BigInt(0)) {
-    throw new Error("Wager must be > 0 nanoERG.");
+  if (wagerNanoErg < MIN_WAGER_NANOERG) {
+    throw new Error(`Wager must be at least ${MIN_WAGER_NANOERG} nanoERG.`);
   }
 
   const inputs = normalizeExplorerBoxes(await fetchUnspentBoxes(creatorAddress));
