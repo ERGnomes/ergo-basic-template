@@ -4,15 +4,14 @@
  * and can be reused across different components.
  */
 
-import { isValidJson } from './textFormat';
+import type {} from "@twobitedd/ergo-dapp-kit/eip12";
 
-// Add TypeScript declarations for the Ergo wallet
-declare global {
-  interface Window {
-    ergoConnector?: any;
-    ergo?: any;
-  }
-}
+import { isValidJson } from "./textFormat";
+
+/** Narrow EIP-12 Ergo context used by wallet UTXO helpers (`window.ergo` is `unknown` in the kit). */
+type ErgoDappContext = {
+  get_utxos(): Promise<any[]>;
+};
 
 // Format a token amount based on its decimals
 export const formatTokenAmount = (amount: number | string | undefined, decimals: number = 0): string => {
@@ -47,9 +46,10 @@ export const shortenTokenId = (tokenId: string, startLength: number = 8, endLeng
 // Check if wallet is connected
 export const isWalletConnected = async (): Promise<boolean> => {
   console.log('Checking if wallet is connected, ergoConnector present:', !!window.ergoConnector);
-  if (!window.ergoConnector) return false;
+  const nautilus = window.ergoConnector?.nautilus;
+  if (!nautilus) return false;
   try {
-    const connected = await window.ergoConnector.nautilus.isConnected();
+    const connected = await nautilus.isConnected();
     console.log('Wallet connection status check returned:', connected);
     return connected;
   } catch (error) {
@@ -61,41 +61,42 @@ export const isWalletConnected = async (): Promise<boolean> => {
 // Connect to wallet
 export const connectWallet = async (): Promise<boolean> => {
   console.log('Attempting to connect wallet, ergoConnector present:', !!window.ergoConnector);
-  if (!window.ergoConnector) {
+  const nautilus = window.ergoConnector?.nautilus;
+  if (!nautilus) {
     console.error('Nautilus wallet not found. Please install the extension.');
     return false;
   }
-  
+
   try {
     // Explicitly check if already connected first
     console.log('Checking if already connected...');
-    const isConnected = await window.ergoConnector.nautilus.isConnected();
+    const isConnected = await nautilus.isConnected();
     console.log('Already connected check result:', isConnected);
-    
+
     // If already connected, just reinitialize the context
     if (isConnected) {
       console.log('Wallet already connected, getting context...');
-      window.ergo = await window.ergoConnector.nautilus.getContext();
+      window.ergo = await nautilus.getContext();
       console.log('Context retrieved successfully:', !!window.ergo);
       return true;
     }
-    
+
     // Attempt to connect if not already connected
     console.log('Not connected, attempting to connect...');
-    const connected = await window.ergoConnector.nautilus.connect();
+    const connected = await nautilus.connect();
     console.log('Connect attempt result:', connected);
-    
+
     // Initialize window.ergo for dApp API
     if (connected) {
       console.log('Getting context after successful connection...');
       try {
-        window.ergo = await window.ergoConnector.nautilus.getContext();
+        window.ergo = await nautilus.getContext();
         console.log('Context retrieved successfully after connection:', !!window.ergo);
       } catch (contextError) {
         console.error('Error getting context after connection:', contextError);
       }
     }
-    
+
     return connected;
   } catch (e) {
     console.error('Error connecting to wallet:', e);
@@ -105,9 +106,10 @@ export const connectWallet = async (): Promise<boolean> => {
 
 // Disconnect from wallet
 export const disconnectWallet = async (): Promise<void> => {
-  if (!window.ergoConnector) return;
+  const nautilus = window.ergoConnector?.nautilus;
+  if (!nautilus) return;
   try {
-    await window.ergoConnector.nautilus.disconnect();
+    await nautilus.disconnect();
     // Clear the ergo context
     window.ergo = undefined;
   } catch (e) {
@@ -240,18 +242,19 @@ export const getTokensFromUtxos = async (utxos: any[]): Promise<any[]> => {
 // Function to get all NFTs from wallet
 export const getWalletNFTs = async (): Promise<any[]> => {
   try {
-    if (!window.ergoConnector) return [];
-    
-    const connected = await window.ergoConnector.nautilus.isConnected();
+    const nautilus = window.ergoConnector?.nautilus;
+    if (!nautilus) return [];
+
+    const connected = await nautilus.isConnected();
     if (!connected) return [];
-    
+
     // Make sure ergo context is initialized
     if (!window.ergo) {
-      window.ergo = await window.ergoConnector.nautilus.getContext();
+      window.ergo = await nautilus.getContext();
     }
-    
-    // Get UTXOs from wallet
-    const utxos = await window.ergo.get_utxos();
+
+    const ergoCtx = window.ergo as ErgoDappContext;
+    const utxos = await ergoCtx.get_utxos();
     
     // Extract NFTs (tokens with quantity = 1)
     const nftTokenIds: string[] = [];
