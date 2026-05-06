@@ -21,18 +21,14 @@ import {
   formatTokenAmount
 } from '../../utils/ergo';
 import { useWallet } from '../../context/WalletContext';
+import type { WalletData } from "@ergnomes/ergo-dapp-kit";
 import {
   dynamicAuthRoutesEnabled,
   nautilusDirectEnabled,
   walletProviderMode,
 } from '../../lib/appEnv';
 
-export interface WalletData {
-  isConnected: boolean;
-  ergBalance: string;
-  tokens: any[];
-  walletStatus: string;
-}
+export type { WalletData };
 
 export const WalletConnector = forwardRef<() => void, {}>((props, ref) => {
   const {

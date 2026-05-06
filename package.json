@@ -10,6 +10,7 @@
     "@chakra-ui/react": "^2.8.2",
     "@dynamic-labs/ethereum": "^4.78.0",
     "@dynamic-labs/sdk-react-core": "^4.78.0",
+    "@ergnomes/ergo-dapp-kit": "file:../ergo-dapp-kit",
     "@emotion/react": "^11.11.4",
     "@emotion/styled": "^11.11.0",
     "@fleet-sdk/compiler": "^0.12.0",

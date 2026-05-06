@@ -13,8 +13,36 @@ module.exports = {
   babel: {
     plugins: [require.resolve("@babel/plugin-syntax-import-attributes")],
   },
+  jest: {
+    configure: (jestConfig) => {
+      jestConfig.transformIgnorePatterns = [
+        "[/\\\\]node_modules[/\\\\](?!(@dynamic-labs|zod|@noble)[/\\\\]).+\\.(js|jsx|mjs|cjs|ts|tsx)$",
+      ];
+      jestConfig.moduleNameMapper = {
+        ...jestConfig.moduleNameMapper,
+        "^@ergnomes/ergo-dapp-kit/env$":
+          "<rootDir>/node_modules/@ergnomes/ergo-dapp-kit/dist/env.js",
+        "^@ergnomes/ergo-dapp-kit/branding$":
+          "<rootDir>/node_modules/@ergnomes/ergo-dapp-kit/dist/branding.js",
+      };
+      return jestConfig;
+    },
+  },
   webpack: {
     configure: (webpackConfig) => {
+      // `@ergnomes/ergo-dapp-kit` ships ESM without explicit `.js` suffixes on
+      // relative imports; CRA/webpack 5 treats those as fully-specified modules.
+      const kitDist = /[/\\](?:@ergnomes[/\\])?ergo-dapp-kit[/\\]dist[/\\]/;
+      const oneOfRule = webpackConfig.module.rules.find((r) => r && r.oneOf);
+      if (oneOfRule && Array.isArray(oneOfRule.oneOf)) {
+        oneOfRule.oneOf.unshift({
+          test: /\.m?js$/,
+          include: kitDist,
+          resolve: { fullySpecified: false },
+          sideEffects: true,
+        });
+      }
+
       webpackConfig.experiments = {
         ...(webpackConfig.experiments || {}),
         asyncWebAssembly: true,
@@ -32,8 +60,7 @@ module.exports = {
       // example openapi-fetch's CJS build, which transitively powers the
       // MetaMask analytics client that Dynamic pulls in. Patch the
       // catch-all so `.cjs` is preserved as a JS module.
-      const oneOfRule = webpackConfig.module.rules.find((r) => r && r.oneOf);
-      if (oneOfRule) {
+      if (oneOfRule && Array.isArray(oneOfRule.oneOf)) {
         const fileLoader = oneOfRule.oneOf.find(
           (r) =>
             r &&
