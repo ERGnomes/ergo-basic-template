@@ -9,8 +9,8 @@ import { isValidJson } from './textFormat';
 // Add TypeScript declarations for the Ergo wallet
 declare global {
   interface Window {
-    ergoConnector: any;
-    ergo: any;
+    ergoConnector?: any;
+    ergo?: any;
   }
 }
 
