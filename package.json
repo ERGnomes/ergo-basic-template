@@ -18,7 +18,7 @@
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.5.2",
-    "@twobitedd/ergo-dapp-kit": "^0.1.1",
+    "@twobitedd/ergo-dapp-kit": "^0.1.2",
     "@types/jest": "^28.1.8",
     "@types/node": "^12.20.55",
     "@types/react": "^18.2.63",

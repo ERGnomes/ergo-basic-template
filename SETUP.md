@@ -23,7 +23,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Wallet kit (`@twobitedd/ergo-dapp-kit`)
 
-This template depends on **`@twobitedd/ergo-dapp-kit`** from the public npm registry (`^0.1.1`). Bump this semver after **`npm publish`** when you ship newer minors/patches. If install fails with “package not found” / **ETARGET**, publish that version first or install from a local tarball: `npm install /path/to/twobitedd-ergo-dapp-kit-0.1.1.tgz --legacy-peer-deps`.
+This template depends on **`@twobitedd/ergo-dapp-kit`** from the public npm registry (`^0.1.2`). Bump this semver after **`npm publish`** when you ship newer minors/patches. If install fails with “package not found” / **ETARGET**, publish that version first or install from a local tarball: `npm install /path/to/twobitedd-ergo-dapp-kit-0.1.2.tgz --legacy-peer-deps`.
 
 ### Funding the email vault from Nautilus
 
