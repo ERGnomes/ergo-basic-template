@@ -19,7 +19,9 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({
 }) => (
   <ErgoWalletProvider
     getVaultErgoAddress={(user) =>
-      findExistingVault(user)?.ergoAddress ?? null
+      findExistingVault(
+        user as { metadata?: unknown } | null | undefined
+      )?.ergoAddress ?? null
     }
   >
     {children}
