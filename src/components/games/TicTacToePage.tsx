@@ -91,21 +91,23 @@ import {
   removePendingTx,
   subscribePending,
 } from "../../lib/games/pendingTx";
-import { IDLE_REFUND_BLOCKS } from "../../lib/games/gameIdleConstants";
+import { IDLE_REFUND_BLOCKS, IDLE_REFUND_FEE_ALLOWANCE_NANO } from "../../lib/games/gameIdleConstants";
 import { recordErgoTxActivity } from "../../lib/ergoTxActivity";
 import {
   gameRecordFromHistory,
   stringifyGameRecord,
 } from "../../lib/games/ticTacToeGameRecord";
-
-const NANO_PER_ERG = 1_000_000_000;
-const MIN_WAGER_ERG = 0.01;
-const DEFAULT_WAGER_ERG = 0.1;
+import {
+  DEFAULT_WAGER_ERG,
+  MIN_WAGER_ERG,
+  NANO_PER_ERG,
+  ergToWagerNano,
+} from "../../lib/games/gameWagerLimits";
 
 const formatErg = (nano: bigint | number | string) => {
   const n = typeof nano === "bigint" ? nano : BigInt(Math.floor(Number(nano)));
-  const whole = n / BigInt(NANO_PER_ERG);
-  const frac = n % BigInt(NANO_PER_ERG);
+  const whole = n / NANO_PER_ERG;
+  const frac = n % NANO_PER_ERG;
   return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "") || "0"}`;
 };
 
@@ -430,12 +432,16 @@ export const TicTacToePage: React.FC = () => {
   const handleCreate = async () => {
     if (!ergoAddress || !myPubKey) return;
     if (wagerErg < MIN_WAGER_ERG) {
-      toast({ title: `Minimum wager is ${MIN_WAGER_ERG} ERG`, status: "warning" });
+      toast({
+        title: "Wager too small",
+        description: `Use at least ${MIN_WAGER_ERG} ERG (1 nanoERG) per player for demos.`,
+        status: "warning",
+      });
       return;
     }
     await withBusy("Building create-game transaction…", async () => {
       try {
-        const wagerNanoErg = BigInt(Math.floor(wagerErg * NANO_PER_ERG));
+        const wagerNanoErg = ergToWagerNano(wagerErg);
         const tx = await buildCreateGameTx({
           creatorAddress: ergoAddress,
           creatorPubKeyHex: myPubKey,
@@ -793,7 +799,9 @@ export const TicTacToePage: React.FC = () => {
             {IDLE_REFUND_BLOCKS.toLocaleString()} blocks (~one week at ~2
             min/block), the player waiting for a move may refund both wagers
             to plain wallet outputs. Games created before this upgrade cannot
-            use idle refund. Test with tiny wagers first.
+            use idle refund. You can wager as little as 1 nanoERG per side for
+            learning; network fees still apply. Idle refund needs a wager larger
+            than the contract&apos;s fee allowance ({formatErg(IDLE_REFUND_FEE_ALLOWANCE_NANO)} ERG).
           </AlertDescription>
         </Stack>
       </Alert>
@@ -1289,8 +1297,8 @@ const CreateGameForm: React.FC<CreateFormProps> = ({
           <NumberInput
             value={wagerErg}
             min={MIN_WAGER_ERG}
-            step={0.01}
-            precision={3}
+            step={0.000001}
+            precision={9}
             maxW="160px"
             onChange={(_, n) => {
               if (Number.isFinite(n)) onWagerChange(n);

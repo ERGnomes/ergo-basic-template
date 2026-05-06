@@ -81,7 +81,13 @@ import {
   unlockWithPasskey,
   ErgoSecretBytes,
 } from "../../lib/ergoKeyVault";
-import { IDLE_REFUND_BLOCKS } from "../../lib/games/gameIdleConstants";
+import { IDLE_REFUND_BLOCKS, IDLE_REFUND_FEE_ALLOWANCE_NANO } from "../../lib/games/gameIdleConstants";
+import {
+  DEFAULT_WAGER_ERG,
+  MIN_WAGER_ERG,
+  NANO_PER_ERG,
+  ergToWagerNano,
+} from "../../lib/games/gameWagerLimits";
 import { recordErgoTxActivity } from "../../lib/ergoTxActivity";
 import {
   PendingSuperTx,
@@ -94,15 +100,12 @@ import {
 } from "../../lib/games/pendingSuperTx";
 import SuperTicTacToeBoard from "./SuperTicTacToeBoard";
 
-const NANO_PER_ERG = 1_000_000_000;
-const MIN_WAGER_ERG = 0.01;
-const DEFAULT_WAGER_ERG = 0.1;
 const EXPLORER_TX = "https://explorer.ergoplatform.com/en/transactions/";
 
 const formatErg = (nano: bigint | number | string) => {
   const n = typeof nano === "bigint" ? nano : BigInt(Math.floor(Number(nano)));
-  const whole = n / BigInt(NANO_PER_ERG);
-  const frac = n % BigInt(NANO_PER_ERG);
+  const whole = n / NANO_PER_ERG;
+  const frac = n % NANO_PER_ERG;
   return `${whole}.${frac.toString().padStart(9, "0").replace(/0+$/, "") || "0"}`;
 };
 
@@ -420,12 +423,16 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
   const handleCreate = async () => {
     if (!ergoAddress || !myPubKey) return;
     if (wagerErg < MIN_WAGER_ERG) {
-      toast({ title: `Minimum wager is ${MIN_WAGER_ERG} ERG`, status: "warning" });
+      toast({
+        title: "Wager too small",
+        description: `Use at least ${MIN_WAGER_ERG} ERG (1 nanoERG) per player for demos.`,
+        status: "warning",
+      });
       return;
     }
     await withBusy("Building create-game transaction…", async () => {
       try {
-        const wagerNanoErg = BigInt(Math.floor(wagerErg * NANO_PER_ERG));
+        const wagerNanoErg = ergToWagerNano(wagerErg);
         const la = await fetchErgoTipHeight();
         const tx = await buildSuperCreateGameTx({
           creatorAddress: ergoAddress,
@@ -815,8 +822,11 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
             Separate ErgoTree from classic tic-tac-toe. Same economics: wager,
             join, moves, winner claim, draw requires co-sign. After{" "}
             {IDLE_REFUND_BLOCKS.toLocaleString()} blocks without a move (~one week
-            at ~2 min/block), the player waiting for a move may refund both wagers.
-            Legacy boxes without an activity height cannot use idle refund.
+            at ~2 min/block), the player waiting for a move may refund both wagers
+            (wager must exceed the contract&apos;s fee allowance,{" "}
+            {formatErg(IDLE_REFUND_FEE_ALLOWANCE_NANO)} ERG). Legacy boxes without an
+            activity height cannot use idle refund. Wagers can be as low as 1 nanoERG
+            per side for demos; fees still apply.
           </AlertDescription>
         </Stack>
       </Alert>
@@ -1018,7 +1028,8 @@ export const SuperTicTacToeChainPanel: React.FC = () => {
                 <NumberInput
                   value={wagerErg}
                   min={MIN_WAGER_ERG}
-                  step={0.01}
+                  step={0.000001}
+                  precision={9}
                   maxW="160px"
                   onChange={(_, n) => {
                     if (Number.isFinite(n)) setWagerErg(n);
