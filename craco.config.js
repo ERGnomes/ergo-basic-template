@@ -24,6 +24,8 @@ module.exports = {
           "<rootDir>/node_modules/@twobitedd/ergo-dapp-kit/dist/env.js",
         "^@twobitedd/ergo-dapp-kit/branding$":
           "<rootDir>/node_modules/@twobitedd/ergo-dapp-kit/dist/branding.js",
+        "^@twobitedd/ergo-dapp-kit/explorer$":
+          "<rootDir>/node_modules/@twobitedd/ergo-dapp-kit/dist/explorer.js",
       };
       return jestConfig;
     },
