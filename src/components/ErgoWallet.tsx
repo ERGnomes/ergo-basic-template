@@ -26,7 +26,7 @@ import {
   useUserUpdateRequest,
 } from "@dynamic-labs/sdk-react-core";
 import { isEthereumWallet } from "@dynamic-labs/ethereum";
-import { isErgoWallet } from "@ergnomes/ergo-dapp-kit";
+import { isErgoWallet } from "@twobitedd/ergo-dapp-kit";
 import { RecoveryPhraseModal } from "./onboarding/RecoveryPhraseModal";
 import { AddressCard } from "./onboarding/AddressCard";
 import {

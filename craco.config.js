@@ -16,23 +16,23 @@ module.exports = {
   jest: {
     configure: (jestConfig) => {
       jestConfig.transformIgnorePatterns = [
-        "[/\\\\]node_modules[/\\\\](?!(@dynamic-labs|zod|@noble)[/\\\\]).+\\.(js|jsx|mjs|cjs|ts|tsx)$",
+        "[/\\\\]node_modules[/\\\\](?!(@dynamic-labs|zod|@noble|@twobitedd)[/\\\\]).+\\.(js|jsx|mjs|cjs|ts|tsx)$",
       ];
       jestConfig.moduleNameMapper = {
         ...jestConfig.moduleNameMapper,
-        "^@ergnomes/ergo-dapp-kit/env$":
-          "<rootDir>/node_modules/@ergnomes/ergo-dapp-kit/dist/env.js",
-        "^@ergnomes/ergo-dapp-kit/branding$":
-          "<rootDir>/node_modules/@ergnomes/ergo-dapp-kit/dist/branding.js",
+        "^@twobitedd/ergo-dapp-kit/env$":
+          "<rootDir>/node_modules/@twobitedd/ergo-dapp-kit/dist/env.js",
+        "^@twobitedd/ergo-dapp-kit/branding$":
+          "<rootDir>/node_modules/@twobitedd/ergo-dapp-kit/dist/branding.js",
       };
       return jestConfig;
     },
   },
   webpack: {
     configure: (webpackConfig) => {
-      // `@ergnomes/ergo-dapp-kit` ships ESM without explicit `.js` suffixes on
+      // `@twobitedd/ergo-dapp-kit` ships ESM without explicit `.js` suffixes on
       // relative imports; CRA/webpack 5 treats those as fully-specified modules.
-      const kitDist = /[/\\](?:@ergnomes[/\\])?ergo-dapp-kit[/\\]dist[/\\]/;
+      const kitDist = /[/\\]ergo-dapp-kit[/\\]dist[/\\]/;
       const oneOfRule = webpackConfig.module.rules.find((r) => r && r.oneOf);
       if (oneOfRule && Array.isArray(oneOfRule.oneOf)) {
         oneOfRule.oneOf.unshift({

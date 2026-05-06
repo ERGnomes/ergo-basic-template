@@ -3,11 +3,11 @@ import {
   ErgoWalletProvider,
   useErgoWallet,
   useWallet,
-} from "@ergnomes/ergo-dapp-kit";
+} from "@twobitedd/ergo-dapp-kit";
 import { findExistingVault } from "../lib/ergoKeyVault";
 
 export { useWallet, useErgoWallet };
-export type { WalletData } from "@ergnomes/ergo-dapp-kit";
+export type { WalletData } from "@twobitedd/ergo-dapp-kit";
 
 interface WalletProviderProps {
   children: ReactNode;

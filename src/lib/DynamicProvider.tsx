@@ -1,5 +1,5 @@
 import React, { ReactNode } from "react";
-import { ErgoDynamicProvider } from "@ergnomes/ergo-dapp-kit";
+import { ErgoDynamicProvider } from "@twobitedd/ergo-dapp-kit";
 
 interface Props {
   children: ReactNode;
@@ -7,7 +7,7 @@ interface Props {
 
 /**
  * Root Dynamic.xyz provider with Ethereum + Nautilus (Ergo EIP-12).
- * Implemented by `@ergnomes/ergo-dapp-kit`.
+ * Implemented by `@twobitedd/ergo-dapp-kit`.
  */
 export const DynamicProvider: React.FC<Props> = ({ children }) => (
   <ErgoDynamicProvider>{children}</ErgoDynamicProvider>

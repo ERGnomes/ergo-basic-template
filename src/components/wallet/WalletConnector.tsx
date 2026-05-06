@@ -21,7 +21,7 @@ import {
   formatTokenAmount
 } from '../../utils/ergo';
 import { useWallet } from '../../context/WalletContext';
-import type { WalletData } from "@ergnomes/ergo-dapp-kit";
+import type { WalletData } from "@twobitedd/ergo-dapp-kit";
 import {
   dynamicAuthRoutesEnabled,
   nautilusDirectEnabled,

@@ -21,6 +21,10 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Wallet kit (`@twobitedd/ergo-dapp-kit`)
+
+This template depends on **`@twobitedd/ergo-dapp-kit`** from the public npm registry (`^0.1.0`). If `npm install` fails with “package not found”, publish that package first (see the kit repo README), or temporarily install from a local tarball: `npm install /path/to/twobitedd-ergo-dapp-kit-0.1.0.tgz --legacy-peer-deps`.
+
 ### Funding the email vault from Nautilus
 
 On `/dynamic`, after you sign into Dynamic and have a vault address, use **Fund passkey vault from Nautilus** — it connects via **`ergoConnector.nautilus`** (classic dApp flow), independent of Dynamic’s in-widget wallet list. You can send ERG and optionally a token/NFT (`tokenId` + amount).

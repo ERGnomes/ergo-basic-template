@@ -1,7 +1,7 @@
 import {
   applyErgoBrandingToEvmNetworks,
   ergoMarkPath,
-} from "@ergnomes/ergo-dapp-kit/branding";
+} from "@twobitedd/ergo-dapp-kit/branding";
 
 describe("applyErgoBrandingToEvmNetworks", () => {
   const base = {

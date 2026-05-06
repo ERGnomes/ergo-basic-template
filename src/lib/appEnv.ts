@@ -7,7 +7,7 @@ import {
   parseWalletProviderMode,
   readErgoDappEnv,
   type WalletProviderMode,
-} from "@ergnomes/ergo-dapp-kit/env";
+} from "@twobitedd/ergo-dapp-kit/env";
 
 export { parseWalletProviderMode };
 export type { WalletProviderMode };
